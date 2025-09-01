@@ -25,24 +25,31 @@ impl App for MyApp {
             // 3. 获取编辑器状态和选区
             let editor_id = egui::Id::new("main_editor_id");
             if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-                let selection = state.cursor.selection();
-                if !selection.is_empty() {
-                    let (start, end) = (selection.start, selection.end);
+                if let Some(char_range) = state.cursor.char_range() {
+                    let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
 
-                    // 4. 执行字符串修改操作
-                    // 确保索引在字符边界上，避免 panic
-                    if self.markdown_text.is_char_boundary(start) && self.markdown_text.is_char_boundary(end) {
-                        let selected_text = &self.markdown_text[start..end];
-                        let new_text = format!("**{}**", selected_text);
+                    if primary_idx != secondary_idx {
+                        // 正确的实现：将字符索引转换为字节索引
+                        let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
+
+                        // 1. 创建字符索引到字节索引的映射
+                        let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
                         
-                        self.markdown_text.replace_range(start..end, &new_text);
+                        // 2. 安全地获取起始和结束的字节索引
+                        if let Some(&start_byte) = char_to_byte.get(start_char) {
+                            let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
 
-                        // 5. (优化项) 更新光标位置
-                        let new_cursor_pos = start + new_text.len();
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                            egui::text::CCursor::new(new_cursor_pos),
-                        )));
-                        state.store(ctx, editor_id);
+                            // 3. 使用正确的字节索引进行字符串操作
+                            let new_text = format!("**{}**", &self.markdown_text[start_byte..end_byte]);
+                            self.markdown_text.replace_range(start_byte..end_byte, &new_text);
+
+                            // 4. 更新光标位置（egui 的 CCursor::new 需要字节索引）
+                            let new_cursor_pos_byte = start_byte + new_text.len();
+                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                                egui::text::CCursor::new(new_cursor_pos_byte),
+                            )));
+                            state.store(ctx, editor_id);
+                        }
                     }
                 }
             }
@@ -91,7 +98,6 @@ impl App for MyApp {
                                 .id_salt("editor_scroll_area") // 使用唯一 ID
                                 .auto_shrink([false; 2])
                                 .show(ui, |ui| {
-                                    // 恢复：重新加入行号显示逻辑
                                     // 创建一个包含行号和文本编辑器的布局
                                     ui.horizontal(|ui| {
                                         // 显示行号
@@ -110,10 +116,9 @@ impl App for MyApp {
                                             });
                                         
                                         // 解决方案：将 TextEdit 控件包裹在一个 ui.vertical 容器中
-                                        // 这有助于 egui 正确计算布局，避免交互区域偏移的问题
                                         ui.vertical(|ui| {
                                             egui::TextEdit::multiline(&mut self.markdown_text)
-                                                .id_source("main_editor_id") // 2. 为 TextEdit 设置唯一 ID
+                                                .id(egui::Id::new("main_editor_id")) // 2. 为 TextEdit 设置唯一 ID
                                                 .code_editor()
                                                 .desired_width(f32::INFINITY)
                                                 .show(ui);
