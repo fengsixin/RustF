@@ -9,15 +9,14 @@ struct MyApp {
     cache: egui_commonmark::CommonMarkCache,
     // 添加滚动状态
     scroll_linked: bool, // 是否启用同步滚动
+    // 保存编辑器的滚动位置
+    editor_scroll_offset: egui::Vec2,
 }
 
 // 2. 实现 eframe::App trait
 impl App for MyApp {
     // 这个方法定义了你的 UI 如何渲染
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // 创建一个共享的滚动 ID
-        let scroll_id = egui::Id::new("shared_scroll_area");
-        
         // 在顶部创建菜单栏
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::containers::menu::MenuBar::new().ui(ui, |ui| {
@@ -43,59 +42,35 @@ impl App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // 创建水平布局，左侧编辑器，右侧预览
             ui.columns(2, |columns| {
-                if self.scroll_linked {
-                    // 使用共享的 ScrollArea 实现同步滚动
-                    // 左侧编辑区域
-                    egui::ScrollArea::vertical()
-                        .id_salt(scroll_id)
-                        .show(&mut columns[0], |ui| {
-                            ui.label("编辑器:");
-                            egui::TextEdit::multiline(&mut self.markdown_text)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(20)
-                                .show(ui)
+                // 左侧编辑区域
+                let editor_scroll_area = egui::ScrollArea::vertical()
+                    .id_salt("editor_scroll_area"); // 使用一个唯一的 ID
+                let editor_response = editor_scroll_area.show(&mut columns[0], |ui| {
+                    ui.label("编辑器:");
+                    egui::TextEdit::multiline(&mut self.markdown_text)
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(20)
+                        .show(ui);
+                });
+                
+                // 保存编辑器的滚动位置
+                self.editor_scroll_offset = editor_response.state.offset;
+                
+                // 右侧预览区域
+                let preview_scroll_area = egui::ScrollArea::vertical()
+                    .id_salt("preview_scroll_area") // 使用另一个唯一的 ID
+                    .scroll_offset(self.editor_scroll_offset); // 设置滚动位置
+                
+                // 显示预览区域
+                preview_scroll_area.show(&mut columns[1], |ui| {
+                    ui.label("预览:");
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
                         });
-                    
-                    // 右侧预览区域
-                    egui::ScrollArea::vertical()
-                        .id_salt(scroll_id)
-                        .show(&mut columns[1], |ui| {
-                            ui.label("预览:");
-                            // 使用 egui_commonmark 来渲染预览
-                            egui::Frame::NONE
-                                .inner_margin(egui::Margin::same(10))
-                                .show(ui, |ui| {
-                                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
-                                })
-                        });
-                } else {
-                    // 独立滚动
-                    // 左侧编辑区域
-                    egui::ScrollArea::vertical()
-                        .id_salt("editor_scroll")
-                        .show(&mut columns[0], |ui| {
-                            ui.label("编辑器:");
-                            egui::TextEdit::multiline(&mut self.markdown_text)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(20)
-                                .show(ui)
-                        });
-                    
-                    // 右侧预览区域
-                    egui::ScrollArea::vertical()
-                        .id_salt("preview_scroll")
-                        .show(&mut columns[1], |ui| {
-                            ui.label("预览:");
-                            // 使用 egui_commonmark 来渲染预览
-                            egui::Frame::NONE
-                                .inner_margin(egui::Margin::same(10))
-                                .show(ui, |ui| {
-                                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
-                                })
-                        });
-                }
+                });
             });
         });
     }
@@ -142,6 +117,7 @@ fn main() {
                 &"# 更多内容\n\n这是更多的内容，用于测试滚动同步功能。\n\n".repeat(50),
                 cache: egui_commonmark::CommonMarkCache::default(),
                 scroll_linked: true, // 默认启用同步滚动
+                editor_scroll_offset: egui::Vec2::ZERO,
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
