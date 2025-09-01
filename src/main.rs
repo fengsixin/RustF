@@ -17,6 +17,38 @@ struct MyApp {
 impl App for MyApp {
     // 这个方法定义了你的 UI 如何渲染
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // --- Ctrl+B 快捷键实现 ---
+        // 1. 捕获键盘输入事件
+        let ctrl_b_pressed = ctx.input(|i| i.key_pressed(egui::Key::B) && i.modifiers.ctrl);
+
+        if ctrl_b_pressed {
+            // 3. 获取编辑器状态和选区
+            let editor_id = egui::Id::new("main_editor_id");
+            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+                let selection = state.cursor.selection();
+                if !selection.is_empty() {
+                    let (start, end) = (selection.start, selection.end);
+
+                    // 4. 执行字符串修改操作
+                    // 确保索引在字符边界上，避免 panic
+                    if self.markdown_text.is_char_boundary(start) && self.markdown_text.is_char_boundary(end) {
+                        let selected_text = &self.markdown_text[start..end];
+                        let new_text = format!("**{}**", selected_text);
+                        
+                        self.markdown_text.replace_range(start..end, &new_text);
+
+                        // 5. (优化项) 更新光标位置
+                        let new_cursor_pos = start + new_text.len();
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(new_cursor_pos),
+                        )));
+                        state.store(ctx, editor_id);
+                    }
+                }
+            }
+        }
+        // --- 快捷键实现结束 ---
+
         // 在顶部创建菜单栏
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::containers::menu::MenuBar::new().ui(ui, |ui| {
@@ -40,37 +72,87 @@ impl App for MyApp {
         
         // 在菜单栏下方创建主内容区域
         egui::CentralPanel::default().show(ctx, |ui| {
-            // 创建水平布局，左侧编辑器，右侧预览
+            // 先获取样式信息，避免借用冲突
+            let stroke_color = ui.style().visuals.widgets.noninteractive.bg_stroke.color;
+            
+            // 使用列布局来创建双面板，它会默认填充可用空间
             ui.columns(2, |columns| {
                 // 左侧编辑区域
-                let editor_scroll_area = egui::ScrollArea::vertical()
-                    .id_salt("editor_scroll_area"); // 使用一个唯一的 ID
-                let editor_response = editor_scroll_area.show(&mut columns[0], |ui| {
-                    ui.label("编辑器:");
-                    egui::TextEdit::multiline(&mut self.markdown_text)
-                        .code_editor()
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(20)
-                        .show(ui);
-                });
-                
-                // 保存编辑器的滚动位置
-                self.editor_scroll_offset = editor_response.state.offset;
+                egui::Frame::new()
+                    .inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 10 })
+                    .stroke(egui::Stroke::new(1.0, stroke_color))
+                    .show(&mut columns[0], |ui| {
+                        ui.vertical(|ui| {
+                            ui.label("编辑区:");
+                            ui.add_space(5.0);
+                            
+                            // 关键：在这里获取编辑器的滚动响应
+                            let editor_scroll_response = egui::ScrollArea::vertical()
+                                .id_salt("editor_scroll_area") // 使用唯一 ID
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    // 恢复：重新加入行号显示逻辑
+                                    // 创建一个包含行号和文本编辑器的布局
+                                    ui.horizontal(|ui| {
+                                        // 显示行号
+                                        egui::Frame::NONE
+                                            .inner_margin(egui::Margin::symmetric(5, 0)) // 保持简单的边距
+                                            .show(ui, |ui| {
+                                                ui.style_mut().visuals.override_text_color = Some(egui::Color32::GRAY);
+                                                // 使用简单的垂直布局来显示行号
+                                                ui.vertical(|ui| {
+                                                    let line_count = self.markdown_text.lines().count().max(1);
+                                                    for i in 1..=line_count {
+                                                        ui.label(format!("{}", i));
+                                                    }
+                                                });
+                                                ui.style_mut().visuals.override_text_color = None;
+                                            });
+                                        
+                                        // 解决方案：将 TextEdit 控件包裹在一个 ui.vertical 容器中
+                                        // 这有助于 egui 正确计算布局，避免交互区域偏移的问题
+                                        ui.vertical(|ui| {
+                                            egui::TextEdit::multiline(&mut self.markdown_text)
+                                                .id_source("main_editor_id") // 2. 为 TextEdit 设置唯一 ID
+                                                .code_editor()
+                                                .desired_width(f32::INFINITY)
+                                                .show(ui);
+                                        });
+                                    });
+                                });
+
+                            // 关键：在每一帧都更新滚动位置
+                            self.editor_scroll_offset = editor_scroll_response.state.offset;
+                        });
+                    });
                 
                 // 右侧预览区域
-                let preview_scroll_area = egui::ScrollArea::vertical()
-                    .id_salt("preview_scroll_area") // 使用另一个唯一的 ID
-                    .scroll_offset(self.editor_scroll_offset); // 设置滚动位置
-                
-                // 显示预览区域
-                preview_scroll_area.show(&mut columns[1], |ui| {
-                    ui.label("预览:");
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
+                egui::Frame::new()
+                    .inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 10 })
+                    .stroke(egui::Stroke::new(1.0, stroke_color))
+                    .show(&mut columns[1], |ui| {
+                        ui.vertical(|ui| {
+                            ui.label("预览区:");
+                            ui.add_space(5.0);
+                            
+                            let mut preview_scroll_area = egui::ScrollArea::vertical()
+                                .id_salt("preview_scroll_area") // 使用另一个唯一的 ID
+                                .auto_shrink([false; 2]);
+                            
+                            // 关键：如果同步滚动被启用，则设置预览区域的滚动位置
+                            if self.scroll_linked {
+                                preview_scroll_area = preview_scroll_area.scroll_offset(self.editor_scroll_offset);
+                            }
+                            
+                            preview_scroll_area.show(ui, |ui| {
+                                egui::Frame::NONE
+                                    .inner_margin(egui::Margin::same(10))
+                                    .show(ui, |ui| {
+                                        egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
+                                    });
+                            });
                         });
-                });
+                    });
             });
         });
     }
