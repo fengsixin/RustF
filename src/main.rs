@@ -3,67 +3,71 @@
 use eframe::{egui, App, Frame, NativeOptions};
 use std::sync::Arc;
 
-// 1. 定义你的应用结构体
+// 1. Define your application structure
 struct MyApp {
-    name: String,
-    age: u32,
-    output: String,
+    markdown_text: String,
+    cache: egui_commonmark::CommonMarkCache,
 }
 
-// 2. 实现 eframe::App trait
+// 2. Implement eframe::App trait
 impl App for MyApp {
-    // 这个方法定义了你的 UI 如何渲染
+    // This method defines how your UI renders
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // 创建一个中央面板，这是最常见的布局方式
+        // Create a central panel, this is the most common layout method
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("我的第一个 Egui 应用");
-
-            ui.horizontal(|ui| {
-                ui.label("你的名字:");
-                ui.text_edit_singleline(&mut self.name);
-            });
-
-            ui.add(egui::Slider::new(&mut self.age, 0..=120).text("你的年龄"));
-
-            if ui.button("点击我").clicked() {
-                // 按钮被点击后执行的逻辑
-                self.output = format!("你好，{}！你 {} 岁了。\n{}", self.name, self.age, self.output);
-            }
+            ui.heading("Markdown Editor");
             
-            // 显示输出区域
-            ui.label("输出:");
-            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                ui.label(&self.output);
+            // Create horizontal layout, editor on the left, preview on the right
+            ui.columns(2, |columns| {
+                // Left editor area
+                egui::ScrollArea::vertical().id_salt("editor").show(&mut columns[0], |ui| {
+                    ui.label("Editor:");
+                    egui::TextEdit::multiline(&mut self.markdown_text)
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(20)
+                        .show(ui);
+                });
+                
+                // Right preview area
+                egui::ScrollArea::vertical().id_salt("preview").show(&mut columns[1], |ui| {
+                    ui.label("Preview:");
+                    // Use egui_commonmark to render preview
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::same(10))  // Changed to integer 10
+                        .show(ui, |ui| {
+                            egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
+                        });
+                });
             });
         });
     }
 }
 
-// 3. 应用入口点
+// 3. Application entry point
 fn main() {
     let native_options = NativeOptions::default();
     eframe::run_native(
-        "Egui 示例",
+        "Markdown Editor",
         native_options,
         Box::new(|cc| {
-            // 加载中文字体
+            // Load Chinese fonts
             setup_chinese_fonts(&cc.egui_ctx);
             
             let app = MyApp {
-                name: "世界".to_owned(),
-                age: 25,
-                output: String::new(),
+                markdown_text: "# Welcome to Markdown Editor\n\nThis is a simple Markdown editor example.\n\n## Features\n\n- Real-time preview\n- Support for headings, lists, code blocks, etc.\n\n```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```\n\n*Italic* and **bold** are also supported.\n\n1. First item\n2. Second item\n3. Third item".to_owned(),
+                cache: egui_commonmark::CommonMarkCache::default(),
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
     ).unwrap();
 }
 
-/// 加载系统中文字体并设置到 egui
+/// Load system Chinese fonts and set them to egui
 fn setup_chinese_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     
-    // 尝试从系统加载中文字体
+    // Try to load Chinese fonts from the system
     if let Some(chinese_font_data) = load_system_chinese_font() {
         fonts.font_data.insert("chinese".to_owned(), Arc::new(chinese_font_data));
         fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "chinese".to_owned());
@@ -73,7 +77,7 @@ fn setup_chinese_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// 尝试从 Windows 系统加载中文字体
+/// Try to load Chinese fonts from the Windows system
 fn load_system_chinese_font() -> Option<egui::FontData> {
     let font_paths = [
         r"C:\Windows\Fonts\msyh.ttc",
