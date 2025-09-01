@@ -13,7 +13,23 @@ struct MyApp {
 impl App for MyApp {
     // This method defines how your UI renders
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // Create a central panel, this is the most common layout method
+        // Create menu bar at the top
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open").clicked() {
+                        ui.close();
+                        self.load_file();
+                    }
+                    if ui.button("Save").clicked() {
+                        ui.close();
+                        self.save_file();
+                    }
+                });
+            });
+        });
+        
+        // Create the main content area below the menu bar
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Markdown Editor");
             
@@ -34,13 +50,39 @@ impl App for MyApp {
                     ui.label("Preview:");
                     // Use egui_commonmark to render preview
                     egui::Frame::NONE
-                        .inner_margin(egui::Margin::same(10))  // Changed to integer 10
+                        .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
                         });
                 });
             });
         });
+    }
+}
+
+impl MyApp {
+    fn load_file(&mut self) {
+        let handle = rfd::FileDialog::new()
+            .add_filter("Markdown", &["md", "markdown"])
+            .add_filter("Text", &["txt"])
+            .pick_file();
+            
+        if let Some(path) = handle {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                self.markdown_text = content;
+            }
+        }
+    }
+    
+    fn save_file(&self) {
+        let handle = rfd::FileDialog::new()
+            .add_filter("Markdown", &["md", "markdown"])
+            .add_filter("Text", &["txt"])
+            .save_file();
+            
+        if let Some(path) = handle {
+            let _ = std::fs::write(path, &self.markdown_text);
+        }
     }
 }
 
