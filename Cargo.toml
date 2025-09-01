@@ -7,3 +7,12 @@ edition = "2024"
 egui = "0.32.1"
 eframe = { version = "0.32.1", features = ["wgpu"] }
 rfd = "0.15.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Windows 专用配置
+[target.'cfg(windows)'.build]
+rustflags = ["-C", "windows-subsystem=windows"]

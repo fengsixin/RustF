@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use eframe::{egui, App, Frame, NativeOptions};
 use std::sync::Arc;
 
@@ -5,6 +7,7 @@ use std::sync::Arc;
 struct MyApp {
     name: String,
     age: u32,
+    output: String,
 }
 
 // 2. 实现 eframe::App trait
@@ -24,8 +27,14 @@ impl App for MyApp {
 
             if ui.button("点击我").clicked() {
                 // 按钮被点击后执行的逻辑
-                println!("你好，{}！你 {} 岁了。", self.name, self.age);
+                self.output = format!("你好，{}！你 {} 岁了。\n{}", self.name, self.age, self.output);
             }
+            
+            // 显示输出区域
+            ui.label("输出:");
+            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                ui.label(&self.output);
+            });
         });
     }
 }
@@ -43,6 +52,7 @@ fn main() {
             let app = MyApp {
                 name: "世界".to_owned(),
                 age: 25,
+                output: String::new(),
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
