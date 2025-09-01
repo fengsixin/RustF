@@ -1,0 +1,9 @@
+[package]
+name = "RustF"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+egui = "0.32.1" # 检查 crates.io 获取最新版本
+eframe = { version = "0.32.1", features = ["wgpu", "native-dialog"] }
+egui-chinese-font = "0.1.0"
