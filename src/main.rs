@@ -100,18 +100,39 @@ impl App for MyApp {
                                 .show(ui, |ui| {
                                     // 创建一个包含行号和文本编辑器的布局
                                     ui.horizontal(|ui| {
-                                        // 显示行号
-                                        egui::Frame::NONE
-                                            .inner_margin(egui::Margin::symmetric(5, 0)) // 保持简单的边距
+                                        // 显示行号 - 新的、手动对齐的实现
+                                        let monospace_font = egui::TextStyle::Monospace.resolve(ui.style());
+                                        let row_height = ctx.fonts(|f| f.row_height(&monospace_font));
+                                        // 使用数字 '0' 的宽度来估算，更准确
+                                        let char_width = ctx.fonts(|f| f.glyph_width(&monospace_font, '0'));
+                                        let line_count = self.markdown_text.lines().count().max(1);
+                                        
+                                        // 根据最大行号的位数动态计算行号区域的宽度
+                                        let num_digits = line_count.to_string().len();
+                                        let line_number_width = (num_digits as f32 * char_width) + 10.0; // 10.0 for padding
+
+                                        egui::Frame::new()
+                                            .inner_margin(egui::Margin { right: 10, ..Default::default() })
                                             .show(ui, |ui| {
                                                 ui.style_mut().visuals.override_text_color = Some(egui::Color32::GRAY);
-                                                // 使用简单的垂直布局来显示行号
-                                                ui.vertical(|ui| {
-                                                    let line_count = self.markdown_text.lines().count().max(1);
-                                                    for i in 1..=line_count {
-                                                        ui.label(format!("{}", i));
-                                                    }
-                                                });
+                                                
+                                                // 手动为整个行号区域分配空间
+                                                let total_height = row_height * line_count as f32;
+                                                let (rect, _) = ui.allocate_exact_size(egui::vec2(line_number_width, total_height), egui::Sense::hover());
+
+                                                // 手动绘制每个行号，确保行高与编辑器完全一致
+                                                for i in 1..=line_count {
+                                                    let line_y = rect.top() + (i - 1) as f32 * row_height;
+                                                    let line_rect = egui::Rect::from_min_size(egui::pos2(rect.left(), line_y), egui::vec2(rect.width(), row_height));
+                                                    
+                                                    ui.painter().text(
+                                                        line_rect.right_center(),
+                                                        egui::Align2::RIGHT_CENTER,
+                                                        i.to_string(),
+                                                        monospace_font.clone(),
+                                                        ui.style().visuals.text_color(),
+                                                    );
+                                                }
                                                 ui.style_mut().visuals.override_text_color = None;
                                             });
                                         
