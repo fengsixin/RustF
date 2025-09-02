@@ -92,58 +92,73 @@ impl App for MyApp {
                         ui.vertical(|ui| {
                             ui.label("编辑区:");
                             ui.add_space(5.0);
-                            
+
                             // 关键：在这里获取编辑器的滚动响应
                             let editor_scroll_response = egui::ScrollArea::vertical()
                                 .id_salt("editor_scroll_area") // 使用唯一 ID
                                 .auto_shrink([false; 2])
                                 .show(ui, |ui| {
-                                    // 创建一个包含行号和文本编辑器的布局
+                                    // --- 最终方案：分离渲染，但统一布局信息源 ---
+
+                                    // 1. 计算行号区域的宽度
+                                    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                                    let char_width = ui.fonts(|f| f.glyph_width(&font_id, '0'));
+                                    let line_count = self.markdown_text.lines().count().max(1);
+                                    let num_digits = line_count.to_string().len();
+                                    // 留出一些额外的空间以避免拥挤
+                                    let line_number_width = (num_digits as f32 * char_width) + 15.0;
+
+                                    // 2. 创建布局“真理之源” (Galley)
+                                    let available_width = ui.available_width() - line_number_width;
+                                    let galley = ui.fonts(|f| {
+                                        f.layout(
+                                            self.markdown_text.clone(),
+                                            font_id.clone(),
+                                            ui.style().visuals.text_color(),
+                                            available_width,
+                                        )
+                                    });
+
                                     ui.horizontal(|ui| {
-                                        // 显示行号 - 新的、手动对齐的实现
-                                        let monospace_font = egui::TextStyle::Monospace.resolve(ui.style());
-                                        let row_height = ctx.fonts(|f| f.row_height(&monospace_font));
-                                        // 使用数字 '0' 的宽度来估算，更准确
-                                        let char_width = ctx.fonts(|f| f.glyph_width(&monospace_font, '0'));
-                                        let line_count = self.markdown_text.lines().count().max(1);
-                                        
-                                        // 根据最大行号的位数动态计算行号区域的宽度
-                                        let num_digits = line_count.to_string().len();
-                                        let line_number_width = (num_digits as f32 * char_width) + 10.0; // 10.0 for padding
+                                // 3. 根据 Galley 绘制行号
+                                let line_number_painter = |ui: &mut egui::Ui| {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(line_number_width, galley.size().y),
+                                        egui::Sense::hover(),
+                                    );
 
-                                        egui::Frame::new()
-                                            .inner_margin(egui::Margin { right: 10, ..Default::default() })
-                                            .show(ui, |ui| {
-                                                ui.style_mut().visuals.override_text_color = Some(egui::Color32::GRAY);
-                                                
-                                                // 手动为整个行号区域分配空间
-                                                let total_height = row_height * line_count as f32;
-                                                let (rect, _) = ui.allocate_exact_size(egui::vec2(line_number_width, total_height), egui::Sense::hover());
+                                    let mut current_line = 1;
+                                    for row in galley.rows.iter() {
+                                        let line_y = rect.min.y + row.rect().min.y;
+                                        let line_rect = egui::Rect::from_min_size(
+                                            egui::pos2(rect.left(), line_y),
+                                            egui::vec2(rect.width(), row.rect().height()),
+                                        );
 
-                                                // 手动绘制每个行号，确保行高与编辑器完全一致
-                                                for i in 1..=line_count {
-                                                    let line_y = rect.top() + (i - 1) as f32 * row_height;
-                                                    let line_rect = egui::Rect::from_min_size(egui::pos2(rect.left(), line_y), egui::vec2(rect.width(), row_height));
-                                                    
-                                                    ui.painter().text(
-                                                        line_rect.right_center(),
-                                                        egui::Align2::RIGHT_CENTER,
-                                                        i.to_string(),
-                                                        monospace_font.clone(),
-                                                        ui.style().visuals.text_color(),
-                                                    );
-                                                }
-                                                ui.style_mut().visuals.override_text_color = None;
-                                            });
+                                        ui.painter().text(
+                                            line_rect.right_center(),
+                                            egui::Align2::RIGHT_CENTER,
+                                            current_line.to_string(),
+                                            font_id.clone(),
+                                            egui::Color32::GRAY,
+                                        );
+                                        current_line += 1;
+                                    }
+                                };
+                                // 使用一个辅助UI来绘制行号，确保布局正确
+                                ui.scope(line_number_painter);
+
+                                        // 4. 绘制标准的 TextEdit
+                                        let editor_response = egui::TextEdit::multiline(&mut self.markdown_text)
+                                            .id(egui::Id::new("main_editor_id"))
+                                            .code_editor()
+                                            .desired_width(available_width)
+                                            .desired_rows(1) // 阻止 TextEdit 自身请求额外空间
+                                            .show(ui)
+                                            .response;
                                         
-                                        // 解决方案：将 TextEdit 控件包裹在一个 ui.vertical 容器中
-                                        ui.vertical(|ui| {
-                                            egui::TextEdit::multiline(&mut self.markdown_text)
-                                                .id(egui::Id::new("main_editor_id")) // 2. 为 TextEdit 设置唯一 ID
-                                                .code_editor()
-                                                .desired_width(f32::INFINITY)
-                                                .show(ui);
-                                        });
+                                        // 将编辑器的响应与行号区域的响应结合（可选，但有助于整体UI行为）
+                                        editor_response
                                     });
                                 });
 
