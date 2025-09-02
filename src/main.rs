@@ -38,6 +38,12 @@ impl App for MyApp {
             request_repaint = true;
         }
 
+        if ctx.input(|i| i.key_pressed(egui::Key::H) && i.modifiers.ctrl) {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::H));
+            self.apply_formatting_to_selection(ctx, "{{", "}}");
+            request_repaint = true;
+        }
+
         if request_repaint {
             ctx.request_repaint();
         }
@@ -106,22 +112,29 @@ impl App for MyApp {
                                     };
 
                                     ui.horizontal(|ui| {
+                                        // --- 粘贴下面的最终代码 ---
                                         let line_number_painter = |ui: &mut egui::Ui| {
                                             let (rect, _) = ui.allocate_exact_size(
                                                 egui::vec2(line_number_width, galley.size().y),
                                                 egui::Sense::hover(),
                                             );
-
+                                        
                                             let mut logical_line = 1;
-                                            for row in galley.rows.iter() {
-                                                // 检查是否是新段落的开始（通过检查第一个字符是否是行首）
-                                                if row.row.glyphs.len() > 0 && row.row.glyphs[0].pos.x == 0.0 {
-                                                    let line_y = rect.min.y + row.rect().min.y;
+                                            // 我们需要同时访问索引和内容，所以使用 enumerate()
+                                            for (i, row) in galley.rows.iter().enumerate() {
+                                                // 判断是否为新逻辑行的开头：
+                                                // 条件1：是第一个视觉行 (i == 0)
+                                                // 条件2：前一个视觉行以换行符结束 (prev_row.row.ends_with_newline)
+                                                if i == 0 || galley.rows.get(i.saturating_sub(1)).map_or(false, |prev_row| prev_row.row.ends_with_newline) {
+                                                    let line_y = rect.min.y + row.pos.y;
+                                                    // 直接使用当前视觉行的高度
+                                                    let row_height = row.row.size.y;
+                                                
                                                     let line_rect = egui::Rect::from_min_size(
                                                         egui::pos2(rect.left(), line_y),
-                                                        egui::vec2(rect.width(), row.rect().height()),
+                                                        egui::vec2(rect.width(), row_height),
                                                     );
-
+                                                
                                                     ui.painter().text(
                                                         line_rect.right_center(),
                                                         egui::Align2::RIGHT_CENTER,
@@ -134,6 +147,7 @@ impl App for MyApp {
                                                 }
                                             }
                                         };
+                                        // --- 粘贴结束 ---
                                         ui.scope(line_number_painter);
 
                                         let editor_response = egui::TextEdit::multiline(&mut self.markdown_text)
@@ -160,14 +174,17 @@ impl App for MyApp {
                             ui.label("预览区:");
                             ui.add_space(5.0);
                             
+
                             let mut preview_scroll_area = egui::ScrollArea::vertical()
                                 .id_salt("preview_scroll_area")
                                 .auto_shrink([false; 2]);
                             
+
                             if self.scroll_linked {
                                 preview_scroll_area = preview_scroll_area.scroll_offset(self.editor_scroll_offset);
                             }
                             
+
                             preview_scroll_area.show(ui, |ui| {
                                 egui::Frame::NONE
                                     .inner_margin(egui::Margin::same(10))
@@ -218,6 +235,7 @@ impl MyApp {
 
                     let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
                     
+
                     if let Some(&start_byte) = char_to_byte.get(start_char) {
                         let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
 
