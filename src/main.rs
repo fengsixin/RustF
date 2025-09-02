@@ -53,6 +53,14 @@ impl App for MyApp {
                         ui.close();
                         self.save_file();
                     }
+                    // --- 新增代码开始 ---
+                    if ui.button("合并文件").clicked() {
+                        // 点击后关闭菜单
+                        ui.close();
+                        // 调用我们将要创建的合并文件逻辑
+                        self.merge_files();
+                    }
+                    // --- 新增代码结束 ---
                 });
                 
                 // 添加同步滚动选项
@@ -256,6 +264,48 @@ impl MyApp {
                         state.store(ctx, editor_id);
                     }
                 }
+            }
+        }
+    }
+    
+    /// 处理合并多个 Markdown 文件的逻辑
+    fn merge_files(&mut self) {
+        // 1. 打开一个可以选择"多个"文件的对话框
+        let files = rfd::FileDialog::new()
+            .add_filter("Markdown", &["md", "markdown"])
+            .add_filter("Text", &["txt"])
+            .pick_files(); // <--- 关键：使用 pick_files() 而不是 pick_file()
+
+        // 2. 检查用户是否选择了文件
+        if let Some(paths) = files {
+            // 如果用户只选了一个或没选，就不做任何事
+            if paths.len() <= 1 {
+                return;
+            }
+
+            let mut combined_content = String::new();
+
+            // 3. 遍历所有选择的文件路径
+            for (index, path) in paths.iter().enumerate() {
+                // 尝试读取每个文件的内容
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    // 将文件内容附加到合并字符串中
+                    combined_content.push_str(&content);
+
+                    // 4. 在文件之间添加一个清晰的分隔符，但不在最后一个文件后面添加
+                    if index < paths.len() - 1 {
+                        // 使用换行符和 Markdown 的水平线作为分隔
+                        // 这可以防止文件内容黏在一起，并在视觉上区分
+                        combined_content.push_str("\n\n---\n\n");
+                    }
+                }
+                // 如果某个文件读取失败，我们会忽略它并继续处理下一个
+            }
+
+            // 5. 如果成功合并了内容，则更新编辑器的主文本
+            if !combined_content.is_empty() {
+                self.markdown_text = combined_content;
+                // UI 将在下一帧自动刷新显示新内容
             }
         }
     }
