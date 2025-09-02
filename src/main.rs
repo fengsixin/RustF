@@ -37,6 +37,12 @@ impl App for MyApp {
             request_repaint = true;
         }
 
+        if ctx.input(|i| i.key_pressed(egui::Key::H) && i.modifiers.ctrl) {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::H));
+            self.apply_formatting_to_selection(ctx, "{{", "}}");
+            request_repaint = true;
+        }
+
         if request_repaint {
             ctx.request_repaint();
         }
