@@ -8,7 +8,7 @@ egui = "0.32.1"
 eframe = { version = "0.32.1", features = ["wgpu"] }
 egui_commonmark = "0.21.1"
 rfd = "0.15.4"
-regex = "1"
+regex = "1.11.2"
 
 [profile.release]
 lto = true
