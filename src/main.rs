@@ -17,44 +17,29 @@ struct MyApp {
 impl App for MyApp {
     // 这个方法定义了你的 UI 如何渲染
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // --- Ctrl+B 快捷键实现 ---
-        // 1. 捕获键盘输入事件
-        let ctrl_b_pressed = ctx.input(|i| i.key_pressed(egui::Key::B) && i.modifiers.ctrl);
+        let mut request_repaint = false;
 
-        if ctrl_b_pressed {
-            // 3. 获取编辑器状态和选区
-            let editor_id = egui::Id::new("main_editor_id");
-            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-                if let Some(char_range) = state.cursor.char_range() {
-                    let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
-
-                    if primary_idx != secondary_idx {
-                        // 正确的实现：将字符索引转换为字节索引
-                        let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
-
-                        // 1. 创建字符索引到字节索引的映射
-                        let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
-                        
-                        // 2. 安全地获取起始和结束的字节索引
-                        if let Some(&start_byte) = char_to_byte.get(start_char) {
-                            let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
-
-                            // 3. 使用正确的字节索引进行字符串操作
-                            let new_text = format!("**{}**", &self.markdown_text[start_byte..end_byte]);
-                            self.markdown_text.replace_range(start_byte..end_byte, &new_text);
-
-                            // 4. 更新光标位置（egui 的 CCursor::new 需要字节索引）
-                            let new_cursor_pos_byte = start_byte + new_text.len();
-                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                                egui::text::CCursor::new(new_cursor_pos_byte),
-                            )));
-                            state.store(ctx, editor_id);
-                        }
-                    }
-                }
-            }
+        if ctx.input(|i| i.key_pressed(egui::Key::B) && i.modifiers.ctrl) {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::B));
+            self.apply_formatting_to_selection(ctx, "**", "**");
+            request_repaint = true;
         }
-        // --- 快捷键实现结束 ---
+        
+        if ctx.input(|i| i.key_pressed(egui::Key::I) && i.modifiers.ctrl) {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::I));
+            self.apply_formatting_to_selection(ctx, "*", "*");
+            request_repaint = true;
+        }
+        
+        if ctx.input(|i| i.key_pressed(egui::Key::U) && i.modifiers.ctrl) {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::U));
+            self.apply_formatting_to_selection(ctx, "[", "]{.underline}");
+            request_repaint = true;
+        }
+
+        if request_repaint {
+            ctx.request_repaint();
+        }
 
         // 在顶部创建菜单栏
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -110,14 +95,13 @@ impl App for MyApp {
 
                                     // 2. 创建布局“真理之源” (Galley)
                                     let available_width = ui.available_width() - line_number_width;
-                                    let galley = ui.fonts(|f| {
-                                        f.layout(
-                                            self.markdown_text.clone(),
-                                            font_id.clone(),
-                                            ui.style().visuals.text_color(),
-                                            available_width,
-                                        )
-                                    });
+                                    // 使用 LayoutJob 来避免克隆字符串
+                                    let galley = {
+                                        let mut job = egui::text::LayoutJob::default();
+                                        job.append(&self.markdown_text, 0.0, egui::TextFormat::simple(font_id.clone(), ui.style().visuals.text_color()));
+                                        job.wrap.max_width = available_width; // 手动设置换行宽度
+                                        ui.fonts(|f| f.layout_job(job))
+                                    };
 
                                     ui.horizontal(|ui| {
                                 // 3. 根据 Galley 绘制行号
@@ -127,22 +111,32 @@ impl App for MyApp {
                                         egui::Sense::hover(),
                                     );
 
-                                    let mut current_line = 1;
-                                    for row in galley.rows.iter() {
-                                        let line_y = rect.min.y + row.rect().min.y;
-                                        let line_rect = egui::Rect::from_min_size(
-                                            egui::pos2(rect.left(), line_y),
-                                            egui::vec2(rect.width(), row.rect().height()),
-                                        );
+                                    // 使用 logical_line 来跟踪逻辑行号
+                                    let mut logical_line = 1;
+                                    // 跟踪上一个字符的位置，用于检测换行
+                                    let mut last_char_pos = egui::Pos2::new(0.0, 0.0);
+                                    for (i, row) in galley.rows.iter().enumerate() {
+                                        // 检查是否是新的一行（通过y坐标变化判断）
+                                        if i == 0 || row.rect().min.y > last_char_pos.y + 1.0 {
+                                            let line_y = rect.min.y + row.rect().min.y;
+                                            let line_rect = egui::Rect::from_min_size(
+                                                egui::pos2(rect.left(), line_y),
+                                                egui::vec2(rect.width(), row.rect().height()),
+                                            );
 
-                                        ui.painter().text(
-                                            line_rect.right_center(),
-                                            egui::Align2::RIGHT_CENTER,
-                                            current_line.to_string(),
-                                            font_id.clone(),
-                                            egui::Color32::GRAY,
-                                        );
-                                        current_line += 1;
+                                            ui.painter().text(
+                                                line_rect.right_center(),
+                                                egui::Align2::RIGHT_CENTER,
+                                                logical_line.to_string(), // 绘制正确的逻辑行号
+                                                font_id.clone(),
+                                                egui::Color32::GRAY,
+                                            );
+                                            
+                                            // 增加逻辑行号
+                                            logical_line += 1;
+                                        }
+                                        // 更新上一个字符的位置
+                                        last_char_pos = row.rect().min;
                                     }
                                 };
                                 // 使用一个辅助UI来绘制行号，确保布局正确
@@ -221,6 +215,48 @@ impl MyApp {
             
         if let Some(path) = handle {
             let _ = std::fs::write(path, &self.markdown_text);
+        }
+    }
+    
+    /// 应用格式化到选中的文本
+    fn apply_formatting_to_selection(&mut self, ctx: &egui::Context, prefix: &str, suffix: &str) {
+        let editor_id = egui::Id::new("main_editor_id");
+        if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+            if let Some(char_range) = state.cursor.char_range() {
+                let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
+
+                if primary_idx != secondary_idx {
+                    // 正确的实现：将字符索引转换为字节索引
+                    let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
+
+                    // 1. 创建字符索引到字节索引的映射
+                    let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
+                    
+                    // 2. 安全地获取起始和结束的字节索引
+                    if let Some(&start_byte) = char_to_byte.get(start_char) {
+                        // 使用 .get() 来安全地处理 end_char，即使它等于 char_to_byte.len()
+                        // 当 .get(end_char) 返回 None 时（即选中到末尾），回退到字符串的总字节长度
+                        let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
+
+                        // 3. 使用正确的字节索引进行字符串操作
+                        let new_text = format!("{}{}{}", prefix, &self.markdown_text[start_byte..end_byte], suffix);
+                        self.markdown_text.replace_range(start_byte..end_byte, &new_text);
+
+                        // 4. 更新光标位置（egui 的 CCursor::new 需要字符索引）
+                        // 首先，计算新插入的文本片段有多少个字符
+                        let new_text_char_len = new_text.chars().count();
+                        
+                        // 新的光标字符索引 = 开始位置的字符索引 + 新文本的字符长度
+                        let new_cursor_pos_char = start_char + new_text_char_len;
+                        
+                        // 使用正确的字符索引来创建 CCursor
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(new_cursor_pos_char),
+                        )));
+                        state.store(ctx, editor_id);
+                    }
+                }
+            }
         }
     }
 }
