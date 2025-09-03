@@ -10,6 +10,7 @@ egui_commonmark = "0.21.1"
 rfd = "0.15.4"
 regex = "1.11.2"
 tempfile = "3.21.0"
+crossbeam-channel = "0.5.13"
 
 [profile.release]
 lto = true

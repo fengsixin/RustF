@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use tempfile::Builder;
+use crossbeam_channel;
 
 struct MyApp {
     markdown_text: String,
@@ -18,10 +19,13 @@ struct MyApp {
     assignment_window_open: bool,
     template_markers: Vec<String>,
     marker_values: HashMap<String, String>,
+    conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
 }
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        self.check_for_conversion_result();
+
         let mut request_repaint = false;
 
         if ctx.input(|i| i.key_pressed(egui::Key::B) && i.modifiers.ctrl) {
@@ -128,6 +132,7 @@ impl App for MyApp {
                                             );
                                         
                                             let mut logical_line = 1;
+                                            let font_id_clone = font_id.clone();
                                             // 我们需要同时访问索引和内容，所以使用 enumerate()
                                             for (i, row) in galley.rows.iter().enumerate() {
                                                 // 判断是否为新逻辑行的开头：
@@ -147,7 +152,7 @@ impl App for MyApp {
                                                         line_rect.right_center(),
                                                         egui::Align2::RIGHT_CENTER,
                                                         logical_line.to_string(),
-                                                        font_id.clone(),
+                                                        font_id_clone.clone(),
                                                         egui::Color32::GRAY,
                                                     );
                                                     
@@ -211,6 +216,30 @@ impl App for MyApp {
 }
 
 impl MyApp {
+    fn check_for_conversion_result(&mut self) {
+        if let Some(receiver) = &self.conversion_receiver {
+            if let Ok(result) = receiver.try_recv() {
+                match result {
+                    Ok(success_message) => {
+                        rfd::MessageDialog::new()
+                            .set_level(rfd::MessageLevel::Info)
+                            .set_title("成功")
+                            .set_description(&success_message)
+                            .show();
+                    }
+                    Err(error_message) => {
+                        rfd::MessageDialog::new()
+                            .set_level(rfd::MessageLevel::Error)
+                            .set_title("导出失败")
+                            .set_description(&error_message)
+                            .show();
+                    }
+                }
+                self.conversion_receiver = None;
+            }
+        }
+    }
+
     fn load_file(&mut self) {
         let handle = rfd::FileDialog::new()
             .add_filter("Markdown", &["md", "markdown"])
@@ -295,83 +324,72 @@ impl MyApp {
         }
     }
 
-    fn export_as_docx(&self) {
-        // 1. 弹出文件保存对话框，让用户选择输出路径
-        let output_path = match rfd::FileDialog::new()
-            .add_filter("Word 文档", &["docx"])
-            .save_file() {
-            Some(path) => path,
-            None => return, // 用户取消了选择
-        };
-
-        // 2. 创建一个带 .md 后缀的临时文件
-        let temp_file_result = Builder::new()
-            .prefix("pandoc_input")
-            .suffix(".md")
-            .tempfile();
-
-        let mut temp_file = match temp_file_result {
-            Ok(file) => file,
-            Err(_) => {
-                // 处理临时文件创建失败的情况
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Error)
-                    .set_title("错误")
-                    .set_description("无法创建临时文件 בו.")
-                    .show();
-                return;
-            }
-        };
-
-        // 3. 将编辑区内容写入临时文件
-        if let Err(_) = temp_file.write_all(self.markdown_text.as_bytes()) {
+    fn export_as_docx(&mut self) {
+        if self.conversion_receiver.is_some() {
             rfd::MessageDialog::new()
-                .set_level(rfd::MessageLevel::Error)
-                .set_title("错误")
-                .set_description("无法写入临时文件 בו.")
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("请稍候")
+                .set_description("上一个转换任务仍在进行中。")
                 .show();
             return;
         }
 
-        // 4. 构建并执行 Pandoc 命令
-        // 注意：这里我们直接使用 "pandoc"，依赖系统 PATH 或程序同目录
-        let pandoc_output = Command::new("C:\\code\\工具\\pandoc\\pandoc.exe")
-            .arg(temp_file.path())
-            .arg("-o")
-            .arg(output_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
+        let output_path = match rfd::FileDialog::new()
+            .add_filter("Word 文档", &["docx"])
+            .save_file() {
+            Some(path) => path,
+            None => return,
+        };
 
-        // 5. 根据 Pandoc 的执行结果向用户反馈
-        match pandoc_output {
-            Ok(output) => {
-                if output.status.success() {
-                    rfd::MessageDialog::new()
-                        .set_level(rfd::MessageLevel::Info)
-                        .set_title("成功")
-                        .set_description("文件已成功导出为 DOCX בו.")
-                        .show();
-                } else {
-                    // Pandoc 执行失败，显示错误信息
-                    let error_message = String::from_utf8_lossy(&output.stderr);
-                    rfd::MessageDialog::new()
-                        .set_level(rfd::MessageLevel::Error)
-                        .set_title("导出失败")
-                        .set_description(&format!("Pandoc 转换失败:\n{}", error_message))
-                        .show();
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.conversion_receiver = Some(receiver);
+        let markdown_content = self.markdown_text.clone();
+
+        std::thread::spawn(move || {
+            let mut temp_file = match Builder::new().prefix("pandoc_input").suffix(".md").tempfile() {
+                Ok(file) => file,
+                Err(_) => {
+                    let _ = sender.send(Err("无法创建临时文件。".to_string()));
+                    return;
                 }
+            };
+
+            if let Err(_) = temp_file.write_all(markdown_content.as_bytes()) {
+                let _ = sender.send(Err("无法写入临时文件。".to_string()));
+                return;
             }
-            Err(e) => {
-                // 命令本身无法执行，很可能是 Pandoc 未安装或不在 PATH 中
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Error)
-                    .set_title("执行错误")
-                    .set_description(&format!("无法执行 Pandoc 命令。\n请确保 Pandoc 已正确安装并位于系统 PATH 中，或与本程序在同一目录下。\n\n错误详情: {}", e))
-                    .show();
-            }
-        }
-        // `temp_file` 会在超出作用域时被自动删除，无需手动清理
+
+            let pandoc_path = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.join("pandoc.exe")))
+                .filter(|p| p.exists())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "pandoc".to_string());
+
+            let pandoc_output = Command::new(pandoc_path)
+                .arg(temp_file.path())
+                .arg("-o")
+                .arg(output_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+
+            let result = match pandoc_output {
+                Ok(output) => {
+                    if output.status.success() {
+                        Ok("文件已成功导出为 DOCX。".to_string())
+                    } else {
+                        let error_message = String::from_utf8_lossy(&output.stderr);
+                        Err(format!("Pandoc 转换失败:\n{}", error_message))
+                    }
+                }
+                Err(e) => {
+                    Err(format!("无法执行 Pandoc 命令。\n请确保 Pandoc 已正确安装并位于系统 PATH 中，或与本程序在同一目录下。\n\n错误详情: {}", e))
+                }
+            };
+            
+            let _ = sender.send(result);
+        });
     }
     
     fn open_assignment_window(&mut self) {
@@ -550,6 +568,7 @@ def hello():
                 assignment_window_open: false,
                 template_markers: Vec::new(),
                 marker_values: HashMap::new(),
+                conversion_receiver: None,
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
