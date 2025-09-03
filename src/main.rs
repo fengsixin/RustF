@@ -20,6 +20,7 @@ struct MyApp {
     template_markers: Vec<String>,
     marker_values: HashMap<String, String>,
     conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    reference_doc_path: Option<std::path::PathBuf>,
 }
 
 impl App for MyApp {
@@ -74,6 +75,32 @@ impl App for MyApp {
                     if ui.button("导出为 DOCX").clicked() {
                         ui.close();
                         self.export_as_docx();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("设置导出模板...").clicked() {
+                        ui.close();
+                        self.set_reference_doc();
+                    }
+
+                    let mut clear_template = false;
+                    if let Some(path) = &self.reference_doc_path {
+                        ui.horizontal(|ui| {
+                            let filename = path.file_name()
+                                .map(|s| s.to_string_lossy())
+                                .unwrap_or_default();
+                            
+                            ui.label(format!("当前模板: {}", filename));
+
+                            if ui.button("清除").clicked() {
+                                clear_template = true;
+                                ui.close();
+                            }
+                        });
+                    }
+                    if clear_template {
+                        self.reference_doc_path = None;
                     }
                 });
                 
@@ -240,6 +267,17 @@ impl MyApp {
         }
     }
 
+    fn set_reference_doc(&mut self) {
+        let handle = rfd::FileDialog::new()
+            .add_filter("Word 文档", &["docx"])
+            .set_title("选择一个 DOCX 模板文件")
+            .pick_file();
+            
+        if let Some(path) = handle {
+            self.reference_doc_path = Some(path);
+        }
+    }
+
     fn load_file(&mut self) {
         let handle = rfd::FileDialog::new()
             .add_filter("Markdown", &["md", "markdown"])
@@ -344,6 +382,7 @@ impl MyApp {
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.conversion_receiver = Some(receiver);
         let markdown_content = self.markdown_text.clone();
+        let reference_doc = self.reference_doc_path.clone();
 
         std::thread::spawn(move || {
             let mut temp_file = match Builder::new().prefix("pandoc_input").suffix(".md").tempfile() {
@@ -366,13 +405,19 @@ impl MyApp {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "pandoc".to_string());
 
-            let pandoc_output = Command::new(pandoc_path)
-                .arg(temp_file.path())
-                .arg("-o")
-                .arg(output_path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output();
+            let mut command = Command::new(pandoc_path);
+            
+            command.arg(temp_file.path())
+                   .arg("-o")
+                   .arg(&output_path);
+
+            if let Some(ref_path) = reference_doc {
+                command.arg("--reference-doc").arg(ref_path);
+            }
+
+            let pandoc_output = command.stdout(Stdio::piped())
+                                     .stderr(Stdio::piped())
+                                     .output();
 
             let result = match pandoc_output {
                 Ok(output) => {
@@ -571,6 +616,7 @@ def hello():
                 template_markers: Vec::new(),
                 marker_values: HashMap::new(),
                 conversion_receiver: None,
+                reference_doc_path: None,
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
