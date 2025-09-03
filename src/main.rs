@@ -4,6 +4,9 @@ use eframe::{egui, App, Frame, NativeOptions};
 use std::sync::Arc;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
+use std::process::{Command, Stdio};
+use tempfile::Builder;
 
 struct MyApp {
     markdown_text: String,
@@ -63,6 +66,10 @@ impl App for MyApp {
                     if ui.button("合并文件").clicked() {
                         ui.close();
                         self.merge_files();
+                    }
+                    if ui.button("导出为 DOCX").clicked() {
+                        ui.close();
+                        self.export_as_docx();
                     }
                 });
                 
@@ -286,6 +293,85 @@ impl MyApp {
                 self.markdown_text = combined_content;
             }
         }
+    }
+
+    fn export_as_docx(&self) {
+        // 1. 弹出文件保存对话框，让用户选择输出路径
+        let output_path = match rfd::FileDialog::new()
+            .add_filter("Word 文档", &["docx"])
+            .save_file() {
+            Some(path) => path,
+            None => return, // 用户取消了选择
+        };
+
+        // 2. 创建一个带 .md 后缀的临时文件
+        let temp_file_result = Builder::new()
+            .prefix("pandoc_input")
+            .suffix(".md")
+            .tempfile();
+
+        let mut temp_file = match temp_file_result {
+            Ok(file) => file,
+            Err(_) => {
+                // 处理临时文件创建失败的情况
+                rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_title("错误")
+                    .set_description("无法创建临时文件 בו.")
+                    .show();
+                return;
+            }
+        };
+
+        // 3. 将编辑区内容写入临时文件
+        if let Err(_) = temp_file.write_all(self.markdown_text.as_bytes()) {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("错误")
+                .set_description("无法写入临时文件 בו.")
+                .show();
+            return;
+        }
+
+        // 4. 构建并执行 Pandoc 命令
+        // 注意：这里我们直接使用 "pandoc"，依赖系统 PATH 或程序同目录
+        let pandoc_output = Command::new("C:\\code\\工具\\pandoc\\pandoc.exe")
+            .arg(temp_file.path())
+            .arg("-o")
+            .arg(output_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+
+        // 5. 根据 Pandoc 的执行结果向用户反馈
+        match pandoc_output {
+            Ok(output) => {
+                if output.status.success() {
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Info)
+                        .set_title("成功")
+                        .set_description("文件已成功导出为 DOCX בו.")
+                        .show();
+                } else {
+                    // Pandoc 执行失败，显示错误信息
+                    let error_message = String::from_utf8_lossy(&output.stderr);
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_title("导出失败")
+                        .set_description(&format!("Pandoc 转换失败:\n{}", error_message))
+                        .show();
+                }
+            }
+            Err(e) => {
+                // 命令本身无法执行，很可能是 Pandoc 未安装或不在 PATH 中
+                rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_title("执行错误")
+                    .set_description(&format!("无法执行 Pandoc 命令。\n请确保 Pandoc 已正确安装并位于系统 PATH 中，或与本程序在同一目录下。\n\n错误详情: {}", e))
+                    .show();
+            }
+        }
+        // `temp_file` 会在超出作用域时被自动删除，无需手动清理
     }
     
     fn open_assignment_window(&mut self) {
