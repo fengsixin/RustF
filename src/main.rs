@@ -465,15 +465,17 @@ impl MyApp {
 fn main() {
     let native_options = NativeOptions::default();
     eframe::run_native(
-        "Markdown 编辑器",
+        "文档风格转换器",
         native_options,
         Box::new(|cc| {
             setup_chinese_fonts(&cc.egui_ctx);
             
             let app = MyApp {
-                markdown_text: "# Markdown 编辑器使用指南
+                markdown_text: "# 文档风格转换器使用指南
 
-欢迎使用本Markdown编辑器！这是一个功能丰富的实时预览编辑器，支持多种Markdown语法。
+欢迎使用本文档风格转换器！这是一个功能丰富的实时预览编辑器，支持多种Markdown语法，使用MD文件实现docx文档风格统一样式。
+
+# MD语法举例
 
 ## 基本语法示例
 
@@ -536,7 +538,7 @@ def hello():
 
 ## 快捷键功能
 
-本编辑器支持以下快捷键：
+本转换器支持以下快捷键：
 
 - **Ctrl+B**：将选中文本加粗（**选中文本**）
 - **Ctrl+I**：将选中文本设为斜体（*选中文本*）
@@ -560,7 +562,7 @@ def hello():
 
 ---
 
-*感谢您使用本Markdown编辑器！*".to_owned(),
+*感谢您使用本转换器！*".to_owned(),
                 cache: egui_commonmark::CommonMarkCache::default(),
                 scroll_linked: true,
                 scroll_proportion: 0.0,
