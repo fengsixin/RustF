@@ -9,7 +9,8 @@ struct MyApp {
     markdown_text: String,
     cache: egui_commonmark::CommonMarkCache,
     scroll_linked: bool,
-    editor_scroll_offset: egui::Vec2,
+    scroll_proportion: f32,
+    preview_max_scroll: f32,
     
     assignment_window_open: bool,
     template_markers: Vec<String>,
@@ -162,7 +163,10 @@ impl App for MyApp {
                                     });
                                 });
 
-                            self.editor_scroll_offset = editor_scroll_response.state.offset;
+                            let max_offset_y = editor_scroll_response.content_size.y - editor_scroll_response.inner_rect.height();
+                            if max_offset_y > 0.0 {
+                                self.scroll_proportion = editor_scroll_response.state.offset.y / max_offset_y;
+                            }
                         });
                     });
                 
@@ -173,25 +177,25 @@ impl App for MyApp {
                         ui.vertical(|ui| {
                             ui.label("预览区:");
                             ui.add_space(5.0);
-                            
 
                             let mut preview_scroll_area = egui::ScrollArea::vertical()
                                 .id_salt("preview_scroll_area")
                                 .auto_shrink([false; 2]);
-                            
 
                             if self.scroll_linked {
-                                preview_scroll_area = preview_scroll_area.scroll_offset(self.editor_scroll_offset);
+                                let target_offset_y = self.scroll_proportion * self.preview_max_scroll;
+                                preview_scroll_area = preview_scroll_area.vertical_scroll_offset(target_offset_y);
                             }
-                            
 
-                            preview_scroll_area.show(ui, |ui| {
+                            let preview_scroll_response = preview_scroll_area.show(ui, |ui| {
                                 egui::Frame::NONE
                                     .inner_margin(egui::Margin::same(10))
                                     .show(ui, |ui| {
                                         egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.cache, &self.markdown_text);
                                     });
                             });
+
+                            self.preview_max_scroll = preview_scroll_response.content_size.y - preview_scroll_response.inner_rect.height();
                         });
                     });
             });
@@ -455,7 +459,8 @@ def hello():
 *感谢您使用本Markdown编辑器！*".to_owned(),
                 cache: egui_commonmark::CommonMarkCache::default(),
                 scroll_linked: true,
-                editor_scroll_offset: egui::Vec2::ZERO,
+                scroll_proportion: 0.0,
+                preview_max_scroll: 0.0,
                 assignment_window_open: false,
                 template_markers: Vec::new(),
                 marker_values: HashMap::new(),
