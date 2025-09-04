@@ -46,6 +46,9 @@ jobs:
     needs: build # 确保在 build job 完成后才运行
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write # 👈 在这里添加
+
     steps:
     - name: Get tag
       id: get_tag
