@@ -20,6 +20,8 @@ struct MyApp {
     template_markers: Vec<String>,
     marker_values: HashMap<String, String>,
     conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    /// 用于从后台线程接收 DOCX -> MD 转换结果
+    import_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
     reference_doc_path: Option<std::path::PathBuf>,
     about_window_open: bool,
 }
@@ -27,6 +29,7 @@ struct MyApp {
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.check_for_conversion_result();
+        self.check_for_import_result();
 
         let mut request_repaint = false;
 
@@ -73,6 +76,13 @@ impl App for MyApp {
                         ui.close();
                         self.merge_files();
                     }
+                    // --- 新增代码开始 ---
+                    ui.separator(); // 添加分割线
+                    if ui.button("导入 DOCX...").clicked() {
+                        ui.close();
+                        self.import_from_docx();
+                    }
+                    // --- 新增代码结束 ---
                     if ui.button("导出为 DOCX").clicked() {
                         ui.close();
                         self.export_as_docx();
@@ -279,6 +289,36 @@ impl MyApp {
         }
     }
 
+    // --- 新增方法 ---
+    fn check_for_import_result(&mut self) {
+        if let Some(receiver) = &self.import_receiver {
+            if let Ok(result) = receiver.try_recv() {
+                match result {
+                    Ok(markdown_content) => {
+                        // 成功，将转换后的内容更新到编辑区
+                        self.markdown_text = markdown_content;
+                        // 可以在这里弹出一个成功的提示
+                        rfd::MessageDialog::new()
+                            .set_level(rfd::MessageLevel::Info)
+                            .set_title("成功")
+                            .set_description("DOCX 文件已成功导入。")
+                            .show();
+                    }
+                    Err(error_message) => {
+                        // 失败，向用户显示错误对话框
+                        rfd::MessageDialog::new()
+                            .set_level(rfd::MessageLevel::Error)
+                            .set_title("导入失败")
+                            .set_description(&error_message)
+                            .show();
+                    }
+                }
+                // 任务完成，清理接收器
+                self.import_receiver = None;
+            }
+        }
+    }
+
     fn set_reference_doc(&mut self) {
         let handle = rfd::FileDialog::new()
             .add_filter("Word 文档", &["docx"])
@@ -372,6 +412,76 @@ impl MyApp {
                 self.markdown_text = combined_content;
             }
         }
+    }
+
+    // --- 新增方法 ---
+    fn import_from_docx(&mut self) {
+        // 防止用户在上一个导入/导出任务未完成时重复点击
+        if self.import_receiver.is_some() || self.conversion_receiver.is_some() {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("请稍候")
+                .set_description("当前有另一个文件操作任务正在进行中。")
+                .show();
+            return;
+        }
+
+        // 1. 弹出文件选择对话框
+        let input_path = match rfd::FileDialog::new()
+            .add_filter("Word 文档", &["docx"])
+            .pick_file() {
+            Some(path) => path,
+            None => return, // 用户取消选择
+        };
+
+        // 2. 创建通道并启动后台线程
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.import_receiver = Some(receiver);
+
+        std::thread::spawn(move || {
+            // 动态查找 Pandoc 路径 (与导出功能逻辑相同)
+            let pandoc_path = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.join("pandoc.exe")))
+                .filter(|p| p.exists())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "pandoc".to_string());
+
+            // 3. 构建并执行 Pandoc 命令
+            //    -f docx: 指定输入格式为 docx
+            //    -t markdown: 指定输出格式为 markdown
+            let pandoc_output = Command::new(pandoc_path)
+                .arg(&input_path)       // 输入文件
+                .arg("-f")
+                .arg("docx")
+                .arg("-t")
+                .arg("markdown")
+                .stdout(Stdio::piped()) // 捕获标准输出 (转换后的 MD 内容)
+                .stderr(Stdio::piped()) // 捕获标准错误
+                .output();
+
+            // 4. 处理命令执行结果
+            let result = match pandoc_output {
+                Ok(output) => {
+                    if output.status.success() {
+                        // 成功，将 stdout 的字节流转换为 String
+                        String::from_utf8(output.stdout)
+                            .map_err(|e| format!("解析 Pandoc 输出失败: {}", e))
+                    } else {
+                        // Pandoc 执行失败，返回错误信息
+                        let error_message = String::from_utf8_lossy(&output.stderr);
+                        Err(format!("Pandoc 转换失败:\n{}", error_message))
+                    }
+                }
+                Err(e) => {
+                    // 命令本身无法执行
+                    Err(format!("无法执行 Pandoc 命令。\n请确保 Pandoc 已正确安装。\n\n错误详情: {}", e))
+                }
+            };
+            
+            // 5. 将结果发送回主线程
+            let _ = sender.send(result);
+        });
     }
 
     fn export_as_docx(&mut self) {
@@ -563,100 +673,7 @@ fn main() {
             setup_chinese_fonts(&cc.egui_ctx);
             
             let app = MyApp {
-                markdown_text: "# 文档风格转换器使用指南
-
-欢迎使用本文档风格转换器！这是一个功能丰富的实时预览编辑器，支持多种Markdown语法，使用MD文件实现docx文档风格统一样式。
-
-# MD语法举例
-
-## 基本语法示例
-
-### 标题
-# 一级标题
-## 二级标题
-### 三级标题
-
-### 列表
-
-**无序列表：**
-- 项目一
-- 项目二
-- 项目三
-
-**有序列表：**
-1. 第一项
-2. 第二项
-3. 第三项
-
-### 代码块
-
-```rust
-fn main() {
-    println!(\"Hello, world!\");
-}
-```
-
-```python
-def hello():
-    print(\"Hello, world!\")
-```
-
-### 格式
-
-- **粗体文本**
-- *斜体文本*
-- ~~删除线文本~~
-- `行内代码`
-
-### 链接和图片
-
-[百度](https://www.baidu.com)
-
-### 表格
-
-| 姓名 | 年龄 | 城市 |
-| ---- | ---- | ---- |
-| 张三 | 25   | 北京 |
-| 李四 | 30   | 上海 |
-
-### 引用
-
-> 这是一个引用块
-> 可以包含多行内容
-
-### 水平线
-
----
-
-## 快捷键功能
-
-本转换器支持以下快捷键：
-
-- **Ctrl+B**：将选中文本加粗（**选中文本**）
-- **Ctrl+I**：将选中文本设为斜体（*选中文本*）
-- **Ctrl+U**：为选中文本添加下划线（[选中文本]{.underline}）
-- **Ctrl+H**：将选中文本设为模版变量（{{选中文本}}）
-
-## 模板功能
-
-您还可以使用模板变量功能，使用 {{变量名}} 的格式定义变量，然后通过“工具”菜单中的“模板赋值”功能为变量赋值。
-
-例如：
-
-项目名称：{{项目名称}}
-
-负责人：{{负责人}}
-
-截止日期：{{截止日期}}
-
-## 文件操作
-
-- **文件合并**：通过“文件”菜单中的“合并文件”功能，可以将多个Markdown文件合并为一个文档
-- **同步滚动**：通过“视图”菜单中的“同步滚动”选项，可以实现编辑区和预览区的同步滚动
-
----
-
-*感谢您使用本转换器！*".to_owned(),
+                markdown_text: include_str!("..\\user_guide.md").to_owned(),
                 cache: egui_commonmark::CommonMarkCache::default(),
                 scroll_linked: true,
                 scroll_proportion: 0.0,
@@ -665,6 +682,7 @@ def hello():
                 template_markers: Vec::new(),
                 marker_values: HashMap::new(),
                 conversion_receiver: None,
+                import_receiver: None,
                 reference_doc_path: None,
                 about_window_open: false,
             };
@@ -687,12 +705,12 @@ fn setup_chinese_fonts(ctx: &egui::Context) {
 
 fn load_system_chinese_font() -> Option<egui::FontData> {
     let font_paths = [
-        r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\msyhbd.ttc",
-        r"C:\Windows\Fonts\simsun.ttc",
-        r"C:\Windows\Fonts\simhei.ttf",
-        r"C:\Windows\Fonts\simkai.ttf",
-        r"C:\Windows\Fonts\simfang.ttf",
+        r"C:\\Windows\\Fonts\\msyh.ttc",
+        r"C:\\Windows\\Fonts\\msyhbd.ttc",
+        r"C:\\Windows\\Fonts\\simsun.ttc",
+        r"C:\\Windows\\Fonts\\simhei.ttf",
+        r"C:\\Windows\\Fonts\\simkai.ttf",
+        r"C:\\Windows\\Fonts\\simfang.ttf",
     ];
     
     for font_path in &font_paths {

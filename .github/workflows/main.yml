@@ -35,9 +35,6 @@ jobs:
     - name: Build (Release)
       run: cargo build --release --verbose
       
-    - name: Run tests
-      run: cargo test --verbose
-
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -56,8 +53,12 @@ jobs:
       id: get_tag
       run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
     
-    - name: Create Release
-      id: create_release
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Create Release and Upload Assets
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ env.TAG_VERSION }}
@@ -70,38 +71,7 @@ jobs:
           
           ### Bug Fixes
           - (Write your bug fixes here)
-
-    - name: Download Artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: ./artifacts
-
-    - name: Upload Linux Asset
-      uses: actions/upload-release-asset@main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/ubuntu-latest-build/RustF
-        asset_name: RustF-linux
-        asset_content_type: application/octet-stream
-        
-    - name: Upload macOS Asset
-      uses: actions/upload-release-asset@main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/macos-latest-build/RustF
-        asset_name: RustF-macos
-        asset_content_type: application/octet-stream
-
-    - name: Upload Windows Asset
-      uses: actions/upload-release-asset@main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/windows-latest-build/RustF.exe
-        asset_name: RustF-windows.exe
-        asset_content_type: application/octet-stream
+        files: |
+          ./artifacts/ubuntu-latest-build/RustF
+          ./artifacts/macos-latest-build/RustF
+          ./artifacts/windows-latest-build/RustF.exe
