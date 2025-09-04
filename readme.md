@@ -3,7 +3,7 @@
 
 **还在为手动调整 Word 文档样式而烦恼吗？**
 
-`RustF` 是一个基于 `egui` 和 `pandoc` 构建的 Markdown 编辑器，它专注于解决一个核心痛点：**将内容创作与文档样式彻底分离**，实现自动化、高效率的 `.docx` 文档生成。
+**RustF** 是一个基于 ***egui** 和 **pandoc** 构建的 Markdown 编辑器，它专注于解决一个核心痛点：**将内容创作与文档样式彻底分离**，实现自动化、高效率的 **.docx** 文档生成。
 
 ## ✨ 核心理念与功能特性
 
@@ -84,10 +84,10 @@ cargo build --release
 1.  **报告问题**：如果您发现了 Bug 或者有功能建议，请在 [Issues](https://www.google.com/search?q=%5B%E6%82%A8%E7%9A%84%E9%A1%B9%E7%9B%AEIssues%E9%A1%B5%E9%9D%A2%E9%93%BE%E6%8E%A5%5D) 页面提交。
 2.  **贡献代码**：
       * Fork 本仓库。
-      * 创建一个新的分支 (`git checkout -b feature/YourAmazingFeature`)。
-      * 提交您的修改 (`git commit -m 'Add some AmazingFeature'`)。
-      * 将分支推送到您的 Fork (`git push origin feature/YourAmazingFeature`)。
-      * 提交一个 Pull Request。
+      * 创建一个新的分支 (**git checkout -b feature/YourAmazingFeature**)。
+      * 提交您的修改 (**git commit -m 'Add some AmazingFeature'**)。
+      * 将分支推送到您的 Fork (**git push origin feature/YourAmazingFeature**)。
+      * 提交一个 **Pull Request**。
 
 ## 📜 许可证
 
