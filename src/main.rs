@@ -21,6 +21,7 @@ struct MyApp {
     marker_values: HashMap<String, String>,
     conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
     reference_doc_path: Option<std::path::PathBuf>,
+    about_window_open: bool,
 }
 
 impl App for MyApp {
@@ -114,9 +115,20 @@ impl App for MyApp {
                         ui.close();
                     }
                 });
+
+                ui.menu_button("帮助", |ui| {
+                    if ui.button("关于...").clicked() {
+                        self.about_window_open = true;
+                        ui.close();
+                    }
+                });
             });
         });
         
+        if self.about_window_open {
+            self.show_about_window(ctx);
+        }
+
         if self.assignment_window_open {
             self.show_assignment_window(ctx);
         }
@@ -505,6 +517,41 @@ impl MyApp {
             });
         self.assignment_window_open = open;
     }
+
+    fn show_about_window(&mut self, ctx: &egui::Context) {
+        let mut close_button_clicked = false;
+        egui::Window::new("关于 文档风格转换器")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut self.about_window_open)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.heading("文档风格转换器");
+                    
+                    ui.label(format!("版本: {}", env!("CARGO_PKG_VERSION")));
+
+                    ui.add_space(10.0);
+                    ui.label("作者: 冯思昕");
+                    ui.add_space(10.0);
+                    
+                    ui.separator();
+
+                    ui.label("鸣谢以下优秀项目:");
+                    ui.hyperlink_to("Rust 语言", "https://www.rust-lang.org/");
+                    ui.hyperlink_to("egui 图形库", "https://github.com/emilk/egui");
+                    ui.hyperlink_to("Pandoc 文档转换工具", "https://pandoc.org/");
+                    
+                    ui.add_space(20.0);
+
+                    if ui.button("关闭").clicked() {
+                        close_button_clicked = true;
+                    }
+                });
+            });
+        if close_button_clicked {
+            self.about_window_open = false;
+        }
+    }
 }
 
 fn main() {
@@ -619,6 +666,7 @@ def hello():
                 marker_values: HashMap::new(),
                 conversion_receiver: None,
                 reference_doc_path: None,
+                about_window_open: false,
             };
             Ok(Box::new(app) as Box<dyn App>)
         }),
