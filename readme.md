@@ -60,7 +60,7 @@
 #### 1\. 前提条件
 
   - 安装 [Rust 工具链](https://www.rust-lang.org/tools/install)。
-  - 安装 [Pandoc](https://pandoc.org/installing.html)，并确保它在您系统的环境变量 `PATH` 中。
+  - 安装 [Pandoc](https://pandoc.org/installing.html)，并确保它在您系统的环境变量**PATH**中。
 
 #### 2\. 编译与运行
 
