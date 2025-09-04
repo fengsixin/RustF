@@ -2,8 +2,11 @@ name: Release
 
 on:
   push:
-    tags: # 当推送新标签时触发
-      - 'v[0-9]+.[0-9]+.[0-9]+' # 匹配类似 v1.0.0 的标签格式
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,26 +41,21 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
+        path: |
+          target/release/RustF
+          target/release/RustF.exe
         name: ${{ matrix.os }}-build
-        path: target/release/
   
   release:
     name: Create Release
-    needs: build # 确保在 build job 完成后才运行
+    needs: build
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write # 👈 在这里添加
 
     steps:
     - name: Get tag
       id: get_tag
       run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
-    - name: Get the SHA of the tag
-      id: get_sha
-      run: echo "TAG_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
+    
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
@@ -72,7 +70,7 @@ jobs:
           
           ### Bug Fixes
           - (Write your bug fixes here)
-        
+
     - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
@@ -84,7 +82,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/ubuntu-latest-build/RustF # 更改为你的可执行文件名
+        asset_path: ./artifacts/ubuntu-latest-build/RustF
         asset_name: RustF-linux
         asset_content_type: application/octet-stream
         
@@ -94,7 +92,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/macos-latest-build/RustF # 更改为你的可执行文件名
+        asset_path: ./artifacts/macos-latest-build/RustF
         asset_name: RustF-macos
         asset_content_type: application/octet-stream
 
@@ -104,6 +102,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/windows-latest-build/RustF.exe # 更改为你的可执行文件名
+        asset_path: ./artifacts/windows-latest-build/RustF.exe
         asset_name: RustF-windows.exe
         asset_content_type: application/octet-stream
