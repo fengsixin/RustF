@@ -29,7 +29,7 @@ impl MyApp {
         font_utils::setup_chinese_fonts(&cc.egui_ctx);
 
         Self {
-            markdown_text: include_str!("..\\user_guide.md").to_owned(),
+            markdown_text: include_str!("../user_guide.md").to_owned(),
             cache: egui_commonmark::CommonMarkCache::default(),
             scroll_linked: true,
             scroll_proportion: 0.0,
@@ -209,9 +209,10 @@ impl MyApp {
         self.import_receiver = Some(receiver);
 
         std::thread::spawn(move || {
+            let pandoc_executable_name = if cfg!(target_os = "windows") { "pandoc.exe" } else { "pandoc" };
             let pandoc_path = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|p| p.join("pandoc.exe")))
+                .and_then(|p| p.parent().map(|p| p.join(pandoc_executable_name)))
                 .filter(|p| p.exists())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "pandoc".to_string());
@@ -281,9 +282,10 @@ impl MyApp {
                 return;
             }
 
+            let pandoc_executable_name = if cfg!(target_os = "windows") { "pandoc.exe" } else { "pandoc" };
             let pandoc_path = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|p| p.join("pandoc.exe")))
+                .and_then(|p| p.parent().map(|p| p.join(pandoc_executable_name)))
                 .filter(|p| p.exists())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "pandoc".to_string());
