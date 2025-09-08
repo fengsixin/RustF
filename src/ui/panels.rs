@@ -35,7 +35,31 @@ impl MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let stroke_color = ui.style().visuals.widgets.noninteractive.bg_stroke.color;
             
+            // 先计算编辑区的滚动信息
+            let (editor_content_height, editor_visible_height) = {
+                let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                let char_width = ui.fonts(|f| f.glyph_width(&font_id, '0'));
+                let line_count = self.markdown_text.lines().count().max(1);
+                let num_digits = line_count.to_string().len();
+                let line_number_width = (num_digits as f32 * char_width) + 15.0;
+                
+                let galley = {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(&self.markdown_text, 0.0, egui::TextFormat::simple(font_id.clone(), ui.style().visuals.text_color()));
+                    job.wrap.max_width = ui.available_width() / 2.0 - line_number_width; // 估算宽度
+                    ui.fonts(|f| f.layout_job(job))
+                };
+                
+                let content_height = galley.size().y;
+                let visible_height = ui.available_height() - 30.0; // 估算可见高度
+                (content_height, visible_height)
+            };
+            
+            let max_offset_y = (editor_content_height - editor_visible_height).max(0.0);
+            let editor_scrollable = max_offset_y > 0.0;
+
             ui.columns(2, |columns| {
+
                 egui::Frame::new() 
                     .inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 10 })
                     .stroke(egui::Stroke::new(1.0, stroke_color))
@@ -106,10 +130,10 @@ impl MyApp {
                                     });
                                 });
 
-                            let max_offset_y = editor_scroll_response.content_size.y - editor_scroll_response.inner_rect.height();
-                            if max_offset_y > 0.0 {
+                            if editor_scrollable {
                                 self.scroll_proportion = editor_scroll_response.state.offset.y / max_offset_y;
                             }
+
                         });
                     });
                 
@@ -125,9 +149,11 @@ impl MyApp {
                                 .id_salt("preview_scroll_area")
                                 .auto_shrink([false; 2]);
 
-                            if self.scroll_linked {
+                            if self.scroll_linked && editor_scrollable {
                                 let target_offset_y = self.scroll_proportion * self.preview_max_scroll;
                                 preview_scroll_area = preview_scroll_area.vertical_scroll_offset(target_offset_y);
+                            } else if !editor_scrollable {
+                                preview_scroll_area = preview_scroll_area.vertical_scroll_offset(0.0);
                             }
 
                             let preview_scroll_response = preview_scroll_area.show(ui, |ui| {
