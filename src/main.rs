@@ -3,9 +3,14 @@
 // 声明新模块
 mod app;
 mod font_utils;
+mod state;
+mod ui;
+mod file_handler;
+mod pandoc;
+
 
 // 导入需要的项
-use app::MyApp;
+use state::MyApp;
 use eframe::{NativeOptions, App};
 
 fn main() {
