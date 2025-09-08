@@ -684,7 +684,7 @@ impl App for MyApp {
         
         if ctx.input(|i| i.key_pressed(egui::Key::U) && i.modifiers.ctrl) {
             ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::U));
-            self.apply_formatting_to_selection(ctx, "[", "]{{.underline}}");
+            self.apply_formatting_to_selection(ctx, "[", "]{.underline}");
             request_repaint = true;
         }
 
@@ -879,7 +879,7 @@ impl App for MyApp {
                     .inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 10 })
                     .stroke(egui::Stroke::new(1.0, stroke_color))
                     .show(&mut columns[1], |ui| {
-                        ui.vertical(|ui| {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                             ui.label("预览区:");
                             ui.add_space(5.0);
 
