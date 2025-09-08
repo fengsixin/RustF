@@ -8,33 +8,35 @@ use tempfile::Builder;
 
 use crate::font_utils;
 
-pub struct MyApp {
-    markdown_text: String,
-    cache: egui_commonmark::CommonMarkCache,
-    scroll_linked: bool,
-    scroll_proportion: f32,
-    preview_max_scroll: f32,
-    
-    assignment_window_open: bool,
-    template_markers: Vec<String>,
-    marker_values: HashMap<String, String>,
-    conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
-    import_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
-    reference_doc_path: Option<std::path::PathBuf>,
-    about_window_open: bool,
-    paragraph_styles: Vec<String>,
-    character_styles: Vec<String>,
+    pub struct MyApp {
+        markdown_text: String,
+        cache: egui_commonmark::CommonMarkCache,
+        scroll_linked: bool,
+        scroll_proportion: f32,
+        preview_max_scroll: f32,
+        
+        assignment_window_open: bool,
+        template_markers: Vec<String>,
+        marker_values: HashMap<String, String>,
+        conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
+        import_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
+        reference_doc_path: Option<std::path::PathBuf>,
+        about_window_open: bool,
+        paragraph_styles: Vec<String>,
+        character_styles: Vec<String>,
 
-    // --- 新增字段 ---
-    /// 控制命令面板是否显示
-    style_palette_open: bool,
-    /// 存储命令面板中的搜索文本
-    palette_search_text: String,
-    /// 存储当前键盘选中的样式在过滤后列表中的索引
-    palette_selected_index: usize,
-    /// 存储过滤后的样式列表，元组包含 (样式名, 是否为段落样式)
-    palette_filtered_styles: Vec<(String, bool)>,
-}
+        // --- 新增字段 ---
+        /// 控制命令面板是否显示
+        style_palette_open: bool,
+        /// 存储命令面板中的搜索文本
+        palette_search_text: String,
+        /// 存储当前键盘选中的样式在过滤后列表中的索引
+        palette_selected_index: usize,
+        /// 存储过滤后的样式列表，元组包含 (样式名, 是否为段落样式)
+        palette_filtered_styles: Vec<(String, bool)>,
+        /// 标志，指示是否需要滚动到选中的项目
+        palette_should_scroll_to_selected: bool,
+    }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
@@ -60,6 +62,7 @@ impl MyApp {
             palette_search_text: String::new(),
             palette_selected_index: 0,
             palette_filtered_styles: Vec::new(),
+            palette_should_scroll_to_selected: false,
         }
     }
 
@@ -146,13 +149,17 @@ impl MyApp {
 
                             for s in docx.styles.styles {
                                 let name = &s.style_id;
+                                // 对于数字ID，我们保留原始ID作为标识符
+                                // 但在UI中显示时，我们可以添加样式类型的提示
+                                let display_name = name.clone();
+                                
                                 if !name.is_empty() && !default_style_ids.contains(name) {
                                     match s.style_type {
                                         docx_rs::StyleType::Paragraph => {
-                                            self.paragraph_styles.push(name.clone());
+                                            self.paragraph_styles.push(display_name);
                                         }
                                         docx_rs::StyleType::Character => {
-                                            self.character_styles.push(name.clone());
+                                            self.character_styles.push(display_name);
                                         }
                                         _ => {}
                                     }
@@ -522,6 +529,9 @@ impl MyApp {
         let mut style_to_apply_from_click = None;
         let mut apply_style_from_enter = false;
 
+        // 重置滚动标志
+        self.palette_should_scroll_to_selected = false;
+
         let area = egui::Area::new("style_palette_area".into())
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO);
 
@@ -551,15 +561,32 @@ impl MyApp {
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    ui.set_width(ui.available_width()); // 使用可用宽度
                     for (i, (style_name, is_block)) in self.palette_filtered_styles.iter().enumerate() {
-                        let label = format!("{} ({})", style_name, if *is_block { "段落" } else { "字符" });
-                        let response = ui.selectable_label(self.palette_selected_index == i, label);
+                        // 对于数字样式ID，添加类型说明
+                        let label = if style_name.chars().all(|c| c.is_ascii_digit()) {
+                            format!("样式ID: {} ({})", style_name, if *is_block { "段落" } else { "字符" })
+                        } else {
+                            format!("{} ({})", style_name, if *is_block { "段落" } else { "字符" })
+                        };
+                        
+                        let response = ui.selectable_label(self.palette_selected_index == i, &label);
+                        
+                        // 通过添加一个占据剩余空间的空元素来填充宽度
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                egui::vec2(ui.available_width(), response.rect.height()),
+                                egui::Label::new("")
+                            );
+                        });
 
                         if response.clicked() {
                             style_to_apply_from_click = Some((style_name.clone(), *is_block));
+                            self.palette_selected_index = i; // 更新选中索引
                         }
 
-                        if self.palette_selected_index == i {
+                        // 只有在需要时才滚动到选中的项目（例如，通过键盘导航）
+                        if self.palette_should_scroll_to_selected && self.palette_selected_index == i {
                             response.scroll_to_me(Some(egui::Align::Center));
                         }
                     }
@@ -569,9 +596,11 @@ impl MyApp {
                     let num_styles = self.palette_filtered_styles.len();
                     if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                         self.palette_selected_index = (self.palette_selected_index + 1) % num_styles;
+                        self.palette_should_scroll_to_selected = true;
                     }
                     if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                         self.palette_selected_index = (self.palette_selected_index + num_styles - 1) % num_styles;
+                        self.palette_should_scroll_to_selected = true;
                     }
                     if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         apply_style_from_enter = true;
@@ -583,12 +612,14 @@ impl MyApp {
         if let Some((style_name, is_block)) = style_to_apply_from_click {
             self.apply_custom_style(ctx, &style_name, is_block);
             self.style_palette_open = false;
+            self.palette_should_scroll_to_selected = false;
         }
 
         if apply_style_from_enter 
             && let Some((style_name, is_block)) = self.palette_filtered_styles.get(self.palette_selected_index).cloned() {
             self.apply_custom_style(ctx, &style_name, is_block);
             self.style_palette_open = false;
+            self.palette_should_scroll_to_selected = false;
         }
 
         if response.response.clicked_elsewhere() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
