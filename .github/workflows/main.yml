@@ -34,13 +34,33 @@ jobs:
 
     - name: Build (Release)
       run: cargo build --release --verbose
-      
+
+    - name: Get tag for artifact naming
+      id: get_tag_artifact
+      run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+    - name: Rename artifacts with version (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        mv target/release/RustF target/release/RustF-${{ env.TAG_VERSION }}-linux
+
+    - name: Rename artifacts with version (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        mv target/release/RustF target/release/RustF-${{ env.TAG_VERSION }}-macos
+
+    - name: Rename artifacts with version (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mv target/release/RustF.exe target/release/RustF-${{ env.TAG_VERSION }}-windows.exe
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         path: |
-          target/release/RustF
-          target/release/RustF.exe
+          target/release/RustF-${{ env.TAG_VERSION }}-linux
+          target/release/RustF-${{ env.TAG_VERSION }}-macos
+          target/release/RustF-${{ env.TAG_VERSION }}-windows.exe
         name: ${{ matrix.os }}-build
   
   release:
@@ -72,6 +92,6 @@ jobs:
           ### Bug Fixes
           - (Write your bug fixes here)
         files: |
-          ./artifacts/ubuntu-latest-build/RustF
-          ./artifacts/macos-latest-build/RustF
-          ./artifacts/windows-latest-build/RustF.exe
+          ./artifacts/ubuntu-latest-build/RustF-${{ env.TAG_VERSION }}-linux
+          ./artifacts/macos-latest-build/RustF-${{ env.TAG_VERSION }}-macos
+          ./artifacts/windows-latest-build/RustF-${{ env.TAG_VERSION }}-windows.exe
