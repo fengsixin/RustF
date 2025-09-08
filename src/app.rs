@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use tempfile::Builder;
-use crossbeam_channel;
 
 
 use crate::font_utils;
@@ -64,53 +63,48 @@ impl MyApp {
         }
     }
 
-    fn check_for_conversion_result(&mut self) {
-        if let Some(receiver) = &self.conversion_receiver {
-            if let Ok(result) = receiver.try_recv() {
-                match result {
-                    Ok(success_message) => {
-                        rfd::MessageDialog::new()
-                            .set_level(rfd::MessageLevel::Info)
-                            .set_title("成功")
-                            .set_description(&success_message)
-                            .show();
-                    }
-                    Err(error_message) => {
-                        rfd::MessageDialog::new()
-                            .set_level(rfd::MessageLevel::Error)
-                            .set_title("导出失败")
-                            .set_description(&error_message)
-                            .show();
-                    }
+    fn check_for_task_result<T, F>(
+        receiver_option: &mut Option<crossbeam_channel::Receiver<Result<T, String>>>,
+        success_handler: F,
+    ) where
+        T: 'static,
+        F: FnOnce(T),
+    {
+        if let Some(receiver) = receiver_option 
+            && let Ok(result) = receiver.try_recv() {
+            match result {
+                Ok(value) => success_handler(value),
+                Err(error_message) => {
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_title("操作失败")
+                        .set_description(&error_message)
+                        .show();
                 }
-                self.conversion_receiver = None;
             }
+            *receiver_option = None;
         }
     }
 
+    fn check_for_conversion_result(&mut self) {
+        Self::check_for_task_result(&mut self.conversion_receiver, |success_message| {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Info)
+                .set_title("成功")
+                .set_description(&success_message)
+                .show();
+        });
+    }
+
     fn check_for_import_result(&mut self) {
-        if let Some(receiver) = &self.import_receiver {
-            if let Ok(result) = receiver.try_recv() {
-                match result {
-                    Ok(markdown_content) => {
-                        self.markdown_text = markdown_content;
-                        rfd::MessageDialog::new()
-                            .set_level(rfd::MessageLevel::Info)
-                            .set_title("成功")
-                            .set_description("DOCX 文件已成功导入。")
-                            .show();
-                    }
-                    Err(error_message) => {
-                        rfd::MessageDialog::new()
-                            .set_level(rfd::MessageLevel::Error)
-                            .set_title("导入失败")
-                            .set_description(&error_message)
-                            .show();
-                    }
-                }
-                self.import_receiver = None;
-            }
-        }
+        Self::check_for_task_result(&mut self.import_receiver, |markdown_content| {
+            self.markdown_text = markdown_content;
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Info)
+                .set_title("成功")
+                .set_description("DOCX 文件已成功导入。")
+                .show();
+        });
     }
 
     fn set_reference_doc(&mut self) {
@@ -129,29 +123,25 @@ impl MyApp {
 
                             let mut default_style_ids = std::collections::HashSet::new();
                             // Common default paragraph styles (style IDs can vary)
-                            default_style_ids.insert("Normal".to_string());
-                            default_style_ids.insert("Heading1".to_string());
-                            default_style_ids.insert("Heading2".to_string());
-                            default_style_ids.insert("Heading3".to_string());
-                            default_style_ids.insert("Heading4".to_string());
-                            default_style_ids.insert("Heading5".to_string());
-                            default_style_ids.insert("Heading6".to_string());
-                            default_style_ids.insert("Heading7".to_string());
-                            default_style_ids.insert("Heading8".to_string());
-                            default_style_ids.insert("Heading9".to_string());
-                            default_style_ids.insert("Title".to_string());
-                            default_style_ids.insert("Subtitle".to_string());
-                            default_style_ids.insert("ListParagraph".to_string());
-                            default_style_ids.insert("Caption".to_string());
-                            default_style_ids.insert("TOC1".to_string());
-                            default_style_ids.insert("TOC2".to_string());
-                            default_style_ids.insert("TOC3".to_string());
-                            default_style_ids.insert("TableNormal".to_string());
-
+                            let common_paragraph_styles = [
+                                "Normal", "Heading1", "Heading2", "Heading3", "Heading4",
+                                "Heading5", "Heading6", "Heading7", "Heading8", "Heading9",
+                                "Title", "Subtitle", "ListParagraph", "Caption",
+                                "TOC1", "TOC2", "TOC3", "TableNormal"
+                            ];
+                            
                             // Common default character styles
-                            default_style_ids.insert("DefaultParagraphFont".to_string());
-                            default_style_ids.insert("Emphasis".to_string());
-                            default_style_ids.insert("Strong".to_string());
+                            let common_character_styles = [
+                                "DefaultParagraphFont", "Emphasis", "Strong"
+                            ];
+
+                            for style in &common_paragraph_styles {
+                                default_style_ids.insert(style.to_string());
+                            }
+                            
+                            for style in &common_character_styles {
+                                default_style_ids.insert(style.to_string());
+                            }
 
 
                             for s in docx.styles.styles {
@@ -175,7 +165,7 @@ impl MyApp {
                             rfd::MessageDialog::new()
                                 .set_level(rfd::MessageLevel::Info)
                                 .set_title("模板加载成功")
-                                .set_description(&format!(
+                                .set_description(format!(
                                     "成功加载模板，发现 {} 个段落样式和 {} 个字符样式。",
                                     self.paragraph_styles.len(),
                                     self.character_styles.len()
@@ -189,7 +179,7 @@ impl MyApp {
                             rfd::MessageDialog::new()
                                 .set_level(rfd::MessageLevel::Error)
                                 .set_title("模板加载失败")
-                                .set_description(&format!("无法解析DOCX文件: {:?}", e))
+                                .set_description(format!("无法解析DOCX文件: {:?}", e))
                                 .show();
                         }
                     }
@@ -201,7 +191,7 @@ impl MyApp {
                     rfd::MessageDialog::new()
                         .set_level(rfd::MessageLevel::Error)
                         .set_title("模板加载失败")
-                        .set_description(&format!("无法读取文件: {}", e))
+                        .set_description(format!("无法读取文件: {}", e))
                         .show();
                 }
             }
@@ -214,10 +204,9 @@ impl MyApp {
             .add_filter("Text", &["txt"])
             .pick_file();
             
-        if let Some(path) = handle {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                self.markdown_text = content;
-            }
+        if let Some(path) = handle 
+            && let Ok(content) = std::fs::read_to_string(path) {
+            self.markdown_text = content;
         }
     }
     
@@ -234,29 +223,28 @@ impl MyApp {
     
     fn apply_formatting_to_selection(&mut self, ctx: &egui::Context, prefix: &str, suffix: &str) {
         let editor_id = egui::Id::new("main_editor_id");
-        if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-            if let Some(char_range) = state.cursor.char_range() {
-                let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
+        if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id)
+            && let Some(char_range) = state.cursor.char_range() {
+            let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
 
-                if primary_idx != secondary_idx {
-                    let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
+            if primary_idx != secondary_idx {
+                let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
 
-                    let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
+                let char_to_byte: Vec<usize> = self.markdown_text.char_indices().map(|(i, _)| i).collect();
+                
+                if let Some(&start_byte) = char_to_byte.get(start_char) {
+                    let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
+
+                    let new_text = format!("{}{}{}", prefix, &self.markdown_text[start_byte..end_byte], suffix);
+                    self.markdown_text.replace_range(start_byte..end_byte, &new_text);
+
+                    let new_text_char_len = new_text.chars().count();
+                    let new_cursor_pos_char = start_char + new_text_char_len;
                     
-                    if let Some(&start_byte) = char_to_byte.get(start_char) {
-                        let end_byte = char_to_byte.get(end_char).copied().unwrap_or(self.markdown_text.len());
-
-                        let new_text = format!("{}{}{}", prefix, &self.markdown_text[start_byte..end_byte], suffix);
-                        self.markdown_text.replace_range(start_byte..end_byte, &new_text);
-
-                        let new_text_char_len = new_text.chars().count();
-                        let new_cursor_pos_char = start_char + new_text_char_len;
-                        
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                            egui::text::CCursor::new(new_cursor_pos_char),
-                        )));
-                        state.store(ctx, editor_id);
-                    }
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(new_cursor_pos_char),
+                    )));
+                    state.store(ctx, editor_id);
                 }
             }
         }
@@ -374,13 +362,13 @@ impl MyApp {
         std::thread::spawn(move || {
             let mut temp_file = match Builder::new().prefix("pandoc_input").suffix(".md").tempfile() {
                 Ok(file) => file,
-                Err(_) => {
-                    let _ = sender.send(Err("无法创建临时文件。".to_string()));
+                Err(e) => {
+                    let _ = sender.send(Err(format!("无法创建临时文件: {}", e)));
                     return;
                 }
             };
 
-            if let Err(_) = temp_file.write_all(markdown_content.as_bytes()) {
+            if temp_file.write_all(markdown_content.as_bytes()).is_err() {
                 let _ = sender.send(Err("无法写入临时文件。".to_string()));
                 return;
             }
@@ -597,11 +585,10 @@ impl MyApp {
             self.style_palette_open = false;
         }
 
-        if apply_style_from_enter {
-            if let Some((style_name, is_block)) = self.palette_filtered_styles.get(self.palette_selected_index).cloned() {
-                self.apply_custom_style(ctx, &style_name, is_block);
-                self.style_palette_open = false;
-            }
+        if apply_style_from_enter 
+            && let Some((style_name, is_block)) = self.palette_filtered_styles.get(self.palette_selected_index).cloned() {
+            self.apply_custom_style(ctx, &style_name, is_block);
+            self.style_palette_open = false;
         }
 
         if response.response.clicked_elsewhere() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -817,7 +804,7 @@ impl App for MyApp {
                                             let mut logical_line = 1;
                                             let font_id_clone = font_id.clone();
                                             for (i, row) in galley.rows.iter().enumerate() {
-                                                if i == 0 || galley.rows.get(i.saturating_sub(1)).map_or(false, |prev_row| prev_row.row.ends_with_newline) {
+                                                if i == 0 || galley.rows.get(i.saturating_sub(1)).is_some_and(|prev_row| prev_row.row.ends_with_newline) {
                                                     let line_y = rect.min.y + row.pos.y;
                                                     let row_height = row.row.size.y;
                                                 
@@ -840,15 +827,13 @@ impl App for MyApp {
                                         };
                                         ui.scope(line_number_painter);
 
-                                        let editor_response = egui::TextEdit::multiline(&mut self.markdown_text)
+                                        egui::TextEdit::multiline(&mut self.markdown_text)
                                             .id(egui::Id::new("main_editor_id"))
                                             .code_editor()
                                             .desired_width(ui.available_width() - line_number_width)
                                             .desired_rows(1)
                                             .show(ui)
-                                            .response;
-                                        
-                                        editor_response
+                                            .response
                                     });
                                 });
 
