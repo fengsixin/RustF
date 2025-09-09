@@ -59,6 +59,45 @@ impl MyApp {
         }
     }
 
+    /// 处理拖入的文件或文件夹
+    pub fn process_dropped_path(&mut self, ctx: &egui::Context, path: &std::path::Path) {
+        if path.is_file() {
+            // 处理单个文件
+            if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
+                let is_image = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"].contains(&extension.to_lowercase().as_str());
+                if is_image {
+                    // 拖入的是图片，调用专门的方法来处理
+                    self.insert_image_markdown(ctx, path);
+                }
+            }
+        } else if path.is_dir() {
+            // 处理文件夹
+            self.process_dropped_directory(ctx, path);
+        }
+    }
+
+    /// 递归处理拖入的文件夹
+    fn process_dropped_directory(&mut self, ctx: &egui::Context, dir_path: &std::path::Path) {
+        if let Ok(entries) = std::fs::read_dir(dir_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    // 处理文件
+                    if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
+                        let is_image = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"].contains(&extension.to_lowercase().as_str());
+                        if is_image {
+                            // 拖入的是图片，调用专门的方法来处理
+                            self.insert_image_markdown(ctx, &path);
+                        }
+                    }
+                } else if path.is_dir() {
+                    // 递归处理子文件夹
+                    self.process_dropped_directory(ctx, &path);
+                }
+            }
+        }
+    }
+
     /// 将 Markdown 图片代码插入到编辑器中
     /// 它会找到当前光标位置并进行插入
     pub fn insert_image_markdown(&mut self, ctx: &egui::Context, file_path: &std::path::Path) {
@@ -71,8 +110,8 @@ impl MyApp {
                 .map(|s| s.to_string_lossy())
                 .unwrap_or_else(|| "image".into());
 
-            // 生成 Markdown 格式的图片引用
-            let markdown_image = format!("![{}]({})", filename, file_path.to_string_lossy());
+            // 生成 Markdown 格式的图片引用，并在末尾添加换行
+            let markdown_image = format!("![{}]({})\n", filename, file_path.to_string_lossy());
             
             // 获取光标位置，如果没有光标则插入到文本末尾
             let current_pos = state.cursor.char_range().map(|r| r.primary.index).unwrap_or(self.markdown_text.chars().count());
@@ -83,7 +122,7 @@ impl MyApp {
             let (prefix, suffix) = chars.split_at(current_pos);
             self.markdown_text = prefix.iter().collect::<String>() + &markdown_image + &suffix.iter().collect::<String>();
             
-            // 将光标移动到新插入文本之后，以便连续拖入多张图片时能正确插入
+            // 将光标移动到新插入文本之后（包括换行符），以便连续拖入多张图片时能正确插入
             let new_cursor_pos = current_pos + markdown_image.chars().count();
             let new_cursor = egui::text::CCursor::new(new_cursor_pos);
             let new_range = egui::text::CCursorRange::one(new_cursor);
@@ -94,7 +133,7 @@ impl MyApp {
             let filename = file_path.file_name()
                 .map(|s| s.to_string_lossy())
                 .unwrap_or_else(|| "image".into());
-            self.markdown_text.push_str(&format!("\n\n![{}]({})", filename, file_path.to_string_lossy()));
+            self.markdown_text.push_str(&format!("\n\n![{}]({})\n", filename, file_path.to_string_lossy()));
         }
     }
 }

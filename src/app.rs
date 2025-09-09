@@ -10,17 +10,8 @@ impl App for MyApp {
         if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
             for file in &ctx.input(|i| i.raw.dropped_files.clone()) {
                 if let Some(path) = &file.path {
-                    // 确保是文件而不是文件夹
-                    if path.is_file() {
-                        // 通过文件扩展名判断是否为图片
-                        if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
-                            let is_image = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"].contains(&extension.to_lowercase().as_str());
-                            if is_image {
-                                // 拖入的是图片，调用专门的方法来处理
-                                self.insert_image_markdown(ctx, path);
-                            }
-                        }
-                    }
+                    // 处理文件或文件夹
+                    self.process_dropped_path(ctx, path);
                 }
             }
         }
