@@ -58,4 +58,43 @@ impl MyApp {
             palette_should_scroll_to_selected: false,
         }
     }
+
+    /// 将 Markdown 图片代码插入到编辑器中
+    /// 它会找到当前光标位置并进行插入
+    pub fn insert_image_markdown(&mut self, ctx: &egui::Context, file_path: &std::path::Path) {
+        // `main_editor_id` 必须与 `panels.rs` 中 TextEdit 的 id_source 相同
+        let editor_id = egui::Id::new("main_editor_id");
+        
+        // 尝试加载编辑器的状态以获取光标位置
+        if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+            let filename = file_path.file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "image".into());
+
+            // 生成 Markdown 格式的图片引用
+            let markdown_image = format!("![{}]({})", filename, file_path.to_string_lossy());
+            
+            // 获取光标位置，如果没有光标则插入到文本末尾
+            let current_pos = state.cursor.char_range().map(|r| r.primary.index).unwrap_or(self.markdown_text.chars().count());
+            
+            // 将字符串切片并插入新文本
+            let text = self.markdown_text.clone();
+            let chars = text.chars().collect::<Vec<_>>();
+            let (prefix, suffix) = chars.split_at(current_pos);
+            self.markdown_text = prefix.iter().collect::<String>() + &markdown_image + &suffix.iter().collect::<String>();
+            
+            // 将光标移动到新插入文本之后，以便连续拖入多张图片时能正确插入
+            let new_cursor_pos = current_pos + markdown_image.chars().count();
+            let new_cursor = egui::text::CCursor::new(new_cursor_pos);
+            let new_range = egui::text::CCursorRange::one(new_cursor);
+            state.cursor.set_char_range(Some(new_range));
+            egui::TextEdit::store_state(ctx, editor_id, state);
+        } else {
+            // 如果无法获取编辑器状态（例如编辑器没有焦点），则直接在文档末尾添加
+            let filename = file_path.file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "image".into());
+            self.markdown_text.push_str(&format!("\n\n![{}]({})", filename, file_path.to_string_lossy()));
+        }
+    }
 }
