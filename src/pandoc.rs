@@ -211,8 +211,19 @@ impl MyApp {
             return;
         }
 
+        // 获取软件所在目录作为默认目录
+        let current_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        // 设置默认文件名
+        let default_file_name = "out01.docx";
+
         let output_path = match rfd::FileDialog::new()
             .add_filter("Word 文档", &["docx"])
+            .set_directory(&current_dir)
+            .set_file_name(default_file_name)
             .save_file() {
             Some(path) => path,
             None => return,
