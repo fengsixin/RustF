@@ -41,7 +41,7 @@ impl MyApp {
     }
 
     pub fn open_assignment_window(&mut self) {
-        let re = Regex::new(r"\{\{([^}]+?)\}" ).unwrap();
+        let re = Regex::new(r"\{\{([^}]+?)\}\}" ).unwrap();
         
         let mut unique_markers = HashSet::new();
         for mat in re.find_iter(&self.markdown_text) {
