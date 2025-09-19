@@ -66,6 +66,10 @@ impl MyApp {
                         self.open_assignment_window();
                         ui.close();
                     }
+                    if ui.button("一键下划线").clicked() {
+                        self.apply_underline_to_variables(ctx);
+                        ui.close();
+                    }
                 });
 
                 ui.menu_button("帮助", |ui| {

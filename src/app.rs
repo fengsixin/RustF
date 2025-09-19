@@ -77,7 +77,48 @@ impl App for MyApp {
         if self.style_palette_open {
             self.show_style_palette(ctx);
         }
+
+        if self.info_dialog_open {
+            self.show_info_dialog(ctx);
+        }
         
         self.show_panels(ctx);
+    }
+}
+
+impl MyApp {
+    pub fn apply_underline_to_variables(&mut self, ctx: &egui::Context) {
+        let mut replacements = Vec::new();
+        let markdown_clone = self.markdown_text.clone();
+
+        for mat in self.underline_regex.find_iter(&markdown_clone) {
+            let start = mat.start();
+            let end = mat.end();
+
+            let is_preceded = markdown_clone.get(..start)
+                .and_then(|s| s.chars().last()) == Some('[');
+            
+            let is_followed = markdown_clone.get(end..)
+                .map_or(false, |s| s.starts_with("]{.underline}"));
+
+            if !is_preceded || !is_followed {
+                replacements.push((mat.range(), format!("[{}]{{.underline}}", mat.as_str())));
+            }
+        }
+
+        let count = replacements.len();
+
+        if count > 0 {
+            for (range, replacement) in replacements.iter().rev() {
+                self.markdown_text.replace_range(range.clone(), replacement);
+            }
+            self.info_dialog_message = format!("成功为 {} 个占位符添加了下划线。", count);
+        } else {
+            self.info_dialog_message = "未找到需要添加下划线的 {{...}} 标记。".to_string();
+        }
+        
+        self.info_dialog_title = "操作完成".to_string();
+        self.info_dialog_open = true;
+        ctx.request_repaint();
     }
 }

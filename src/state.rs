@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::font_utils;
+use regex::Regex;
 
 pub struct MyApp {
     pub markdown_text: String,
@@ -29,11 +30,20 @@ pub struct MyApp {
     pub palette_filtered_styles: Vec<(String, bool)>,
     /// 标志，指示是否需要滚动到选中的项目
     pub palette_should_scroll_to_selected: bool,
+    // 正则表达式
+    pub underline_regex: Regex,
+
+    // 通用信息提示框
+    pub info_dialog_open: bool,
+    pub info_dialog_title: String,
+    pub info_dialog_message: String,
 }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         font_utils::setup_chinese_fonts(&cc.egui_ctx);
+
+        let underline_regex = Regex::new(r"\{\{.*?\}\}").unwrap();
 
         Self {
             markdown_text: include_str!("../user_guide.md").to_owned(),
@@ -56,6 +66,10 @@ impl MyApp {
             palette_selected_index: 0,
             palette_filtered_styles: Vec::new(),
             palette_should_scroll_to_selected: false,
+            underline_regex,
+            info_dialog_open: false,
+            info_dialog_title: String::new(),
+            info_dialog_message: String::new(),
         }
     }
 

@@ -246,4 +246,24 @@ impl MyApp {
             self.style_palette_open = false;
         }
     }
+
+    pub fn show_info_dialog(&mut self, ctx: &egui::Context) {
+        let mut close_button_clicked = false;
+        egui::Window::new(self.info_dialog_title.as_str())
+            .collapsible(false)
+            .resizable(true)
+            .open(&mut self.info_dialog_open)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(self.info_dialog_message.as_str());
+                    ui.add_space(20.0);
+                    if ui.button("关闭").clicked() {
+                        close_button_clicked = true;
+                    }
+                });
+            });
+        if close_button_clicked {
+            self.info_dialog_open = false;
+        }
+    }
 }
