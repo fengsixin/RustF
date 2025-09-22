@@ -1,6 +1,4 @@
 use eframe::egui;
-use regex::Regex;
-use std::collections::HashSet;
 
 use crate::state::MyApp;
 
@@ -41,28 +39,16 @@ impl MyApp {
     }
 
     pub fn open_assignment_window(&mut self) {
-        let re = Regex::new(r"\{\{([^}]+?)\}\}" ).unwrap();
-        
-        let mut unique_markers = HashSet::new();
-        for mat in re.find_iter(&self.markdown_text) {
-            unique_markers.insert(mat.as_str().to_string());
-        }
-        
-        self.template_markers = unique_markers.into_iter().collect();
-        self.template_markers.sort();
-
-        self.marker_values.clear();
-        for marker in &self.template_markers {
-            self.marker_values.insert(marker.clone(), String::new());
-        }
-
+        self.scan_and_update_markers();
         self.assignment_window_open = true;
     }
     
     pub fn show_assignment_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.assignment_window_open;
+        let mut apply_and_close = false;
+        let mut cancel_and_close = false;
+
         egui::Window::new("模板变量赋值")
-            .open(&mut open)
+            .open(&mut self.assignment_window_open)
             .resizable(true)
             .default_width(400.0)
             .show(ctx, |ui| {
@@ -91,22 +77,23 @@ impl MyApp {
                 
                 ui.horizontal(|ui| {
                     if ui.button("全部替换").clicked() {
-                        for (marker, value) in &self.marker_values {
-                            if !value.is_empty() {
-                                self.markdown_text = self.markdown_text.replace(marker, value);
-                            }
-                        }
-                        self.assignment_window_open = false;
-                        self.template_markers.clear();
-                        self.marker_values.clear();
+                        apply_and_close = true;
                     }
 
                     if ui.button("取消").clicked() {
-                        self.assignment_window_open = false;
+                        cancel_and_close = true;
                     }
                 });
             });
-        self.assignment_window_open = open;
+
+        if apply_and_close {
+            self.apply_template_variables_to_markdown();
+            self.template_markers.clear();
+            self.assignment_window_open = false;
+        }
+        if cancel_and_close {
+            self.assignment_window_open = false;
+        }
     }
 
     pub fn apply_custom_style(&mut self, ctx: &egui::Context, style_name: &str, is_block: bool) {
@@ -264,6 +251,51 @@ impl MyApp {
             });
         if close_button_clicked {
             self.info_dialog_open = false;
+        }
+    }
+
+    pub fn show_import_dialog(&mut self, ctx: &egui::Context) {
+        let mut import_and_close = false;
+        let mut cancel_and_close = false;
+
+        egui::Window::new("导入模板变量")
+            .open(&mut self.import_dialog_open)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(300.0)
+            .show(ctx, |ui| {
+                ui.label("请将导出的变量内容粘贴到下方文本框中：");
+                ui.add_space(10.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 200.0],
+                        egui::TextEdit::multiline(&mut self.import_text_area)
+                            .desired_width(f32::INFINITY)
+                    );
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    if ui.button("导入并替换").clicked() {
+                        import_and_close = true;
+                    }
+
+                    if ui.button("取消").clicked() {
+                        cancel_and_close = true;
+                    }
+                });
+            });
+
+        if import_and_close {
+            self.import_and_apply_variables(&self.import_text_area.clone());
+            self.import_text_area.clear();
+            self.import_dialog_open = false;
+        }
+        if cancel_and_close {
+            self.import_dialog_open = false;
         }
     }
 }

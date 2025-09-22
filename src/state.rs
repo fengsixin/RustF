@@ -12,8 +12,8 @@ pub struct MyApp {
     pub assignment_window_open: bool,
     pub template_markers: Vec<String>,
     pub marker_values: HashMap<String, String>,
-    pub conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
-    pub import_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>, 
+    pub conversion_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    pub import_receiver: Option<crossbeam_channel::Receiver<Result<String, String>>>,
     pub reference_doc_path: Option<std::path::PathBuf>,
     pub about_window_open: bool,
     pub paragraph_styles: Vec<String>,
@@ -37,8 +37,11 @@ pub struct MyApp {
     pub info_dialog_open: bool,
     pub info_dialog_title: String,
     pub info_dialog_message: String,
-}
 
+    // 模板导入
+    pub import_dialog_open: bool,
+    pub import_text_area: String,
+}
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         font_utils::setup_chinese_fonts(&cc.egui_ctx);
@@ -70,6 +73,8 @@ impl MyApp {
             info_dialog_open: false,
             info_dialog_title: String::new(),
             info_dialog_message: String::new(),
+            import_dialog_open: false,
+            import_text_area: String::new(),
         }
     }
 

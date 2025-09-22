@@ -52,4 +52,29 @@ impl MyApp {
             }
         }
     }
+
+    pub fn export_template_variables(&mut self) {
+        self.scan_and_update_markers();
+        if self.marker_values.is_empty() {
+            self.open_info_dialog("导出模板变量", "没有找到任何模板变量，无需导出。");
+            return;
+        }
+
+        let mut content = String::new();
+        for (key, value) in &self.marker_values {
+            content.push_str(&format!("{}={}\n", key, value));
+        }
+
+        let handle = rfd::FileDialog::new()
+            .add_filter("Text", &["txt"])
+            .set_file_name("template_variables.txt")
+            .save_file();
+
+        if let Some(path) = handle {
+            match std::fs::write(path, &content) {
+                Ok(_) => self.open_info_dialog("成功", "模板变量已成功导出。"),
+                Err(e) => self.open_info_dialog("错误", &format!("导出失败：{}", e)),
+            }
+        }
+    }
 }

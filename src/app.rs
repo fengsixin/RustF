@@ -1,5 +1,7 @@
 use eframe::{egui, App, Frame};
 use crate::state::MyApp;
+use regex::Regex;
+use std::collections::HashSet;
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
@@ -81,12 +83,101 @@ impl App for MyApp {
         if self.info_dialog_open {
             self.show_info_dialog(ctx);
         }
+
+        if self.import_dialog_open {
+            self.show_import_dialog(ctx);
+        }
         
         self.show_panels(ctx);
     }
 }
 
 impl MyApp {
+    pub fn scan_and_update_markers(&mut self) {
+        let re = Regex::new(r"\{\{([^}]+?)\}\}").unwrap();
+        let mut current_markers = HashSet::new();
+        for mat in re.find_iter(&self.markdown_text) {
+            current_markers.insert(mat.as_str().to_string());
+        }
+
+        // Create a new map with only the current markers, preserving old values
+        let mut new_marker_values = std::collections::HashMap::new();
+        for marker in &current_markers {
+            if let Some(old_value) = self.marker_values.get(marker) {
+                new_marker_values.insert(marker.clone(), old_value.clone());
+            } else {
+                new_marker_values.insert(marker.clone(), String::new());
+            }
+        }
+        
+        // Replace the old map with the new one
+        self.marker_values = new_marker_values;
+
+        // Update the sorted list of markers for the UI
+        self.template_markers = current_markers.into_iter().collect();
+        self.template_markers.sort();
+    }
+
+    pub fn open_info_dialog(&mut self, title: &str, message: &str) {
+        self.info_dialog_title = title.to_owned();
+        self.info_dialog_message = message.to_owned();
+        self.info_dialog_open = true;
+    }
+
+    /// Parses a string of `key=value` pairs, updates the internal `marker_values`,
+    /// and then applies all variables to the markdown text.
+    pub fn import_and_apply_variables(&mut self, text: &str) {
+        // First, get a clean state of markers from the document
+        self.scan_and_update_markers();
+
+        let mut updated_count = 0;
+
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+
+                let full_marker = if key.starts_with("{{") && key.ends_with("}}") {
+                    key.to_string()
+                } else {
+                    format!("{{{{{}}}}}", key)
+                };
+
+                // ONLY update if the marker is currently in the document
+                if self.marker_values.contains_key(&full_marker) {
+                    self.marker_values.insert(full_marker, value.to_string());
+                    updated_count += 1;
+                }
+            }
+        }
+
+        if updated_count > 0 {
+            self.apply_template_variables_to_markdown();
+            self.open_info_dialog(
+                "导入完成",
+                &format!("成功更新并应用了 {} 个变量。", updated_count)
+            );
+        } else {
+            self.open_info_dialog(
+                "导入提醒",
+                "没有发现可匹配的变量进行更新。"
+            );
+        }
+    }
+
+    /// Replaces all placeholders in the markdown text with their corresponding values.
+    pub fn apply_template_variables_to_markdown(&mut self) {
+        for (marker, value) in self.marker_values.clone() {
+            if !value.is_empty() {
+                self.markdown_text = self.markdown_text.replace(&marker, &value);
+            }
+        }
+    }
+
     pub fn apply_underline_to_variables(&mut self, ctx: &egui::Context) {
         let mut replacements = Vec::new();
         let markdown_clone = self.markdown_text.clone();

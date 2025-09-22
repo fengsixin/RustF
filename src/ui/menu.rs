@@ -70,6 +70,15 @@ impl MyApp {
                         self.apply_underline_to_variables(ctx);
                         ui.close();
                     }
+                    ui.separator();
+                    if ui.button("导入模板变量").clicked() {
+                        self.import_dialog_open = true;
+                        ui.close();
+                    }
+                    if ui.button("导出模板变量").clicked() {
+                        self.export_template_variables();
+                        ui.close();
+                    }
                 });
 
                 ui.menu_button("帮助", |ui| {
