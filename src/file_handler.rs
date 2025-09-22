@@ -42,7 +42,7 @@ impl MyApp {
                     combined_content.push_str(&content);
 
                     if index < paths.len() - 1 {
-                        combined_content.push_str("\n\n---\n\n");
+                        combined_content.push_str("\n\n");
                     }
                 }
             }
