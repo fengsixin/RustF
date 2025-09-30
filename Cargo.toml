@@ -12,6 +12,7 @@ regex = "1.11.2"
 tempfile = "3.21.0"
 crossbeam-channel = "0.5.13"
 docx-rs = "0.4.9"
+lazy_static = "1.5.0"
 
 [profile.release]
 lto = true
