@@ -91,9 +91,7 @@ mod state {
 
     static UNDERLINE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{.*?\}\}").expect("Invalid regex for underline"));
     static TEMPLATE_VAR_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([^}]+?)\}\}").expect("Invalid regex for template variables"));
-    static IMAGE_WIDTH_CONTROL_REGEX: Lazy<Regex> = Lazy::new(|| 
-        Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)(?!\{)").expect("Invalid regex for image width control")
-    );
+    static IMAGE_WIDTH_CONTROL_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"!\{\(.*?\)\}\[(.*?)\]\((.*?)\)").expect("Invalid regex for image width control"));
 
     pub struct MyApp {
         pub markdown_text: String,
@@ -125,10 +123,6 @@ mod state {
         pub import_dialog_open: bool,
         pub import_text_area: String,
         pub processing_task: bool,
-        pub markdown_text_hash: u64,
-
-        pub cached_galley: Option<std::sync::Arc<egui::Galley>>,
-        pub cached_editor_width: f32,
     }
 
     impl App for MyApp {
@@ -178,13 +172,6 @@ mod state {
 
             if request_repaint {
                 ctx.request_repaint();
-            }
-
-            let new_hash = fxhash::hash64(self.markdown_text.as_bytes());
-            if new_hash != self.markdown_text_hash {
-                self.scan_and_update_markers();
-                self.markdown_text_hash = new_hash;
-                self.cached_galley = None; // Invalidate galley cache
             }
 
             if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.ctrl && i.modifiers.shift) {
@@ -272,10 +259,6 @@ mod state {
                 import_dialog_open: false,
                 import_text_area: String::new(),
                 processing_task: false,
-                markdown_text_hash: fxhash::hash64(include_str!("../user_guide.md").as_bytes()),
-
-                cached_galley: None,
-                cached_editor_width: 0.0,
             }
         }
 
@@ -465,7 +448,24 @@ mod state {
                 .unwrap_or_else(|| "pandoc".to_string())
         }
 
-
+        fn calculate_editor_metrics(&self, ui: &mut egui::Ui) -> (f32, f32, f32, f32) {
+            let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+            let char_width = ui.fonts(|f| f.glyph_width(&font_id, '0'));
+            let line_count = self.markdown_text.lines().count().max(1);
+            let num_digits = line_count.to_string().len();
+            let line_number_width = (num_digits as f32 * char_width) + 15.0;
+            
+            let galley = {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&self.markdown_text, 0.0, egui::TextFormat::simple(font_id.clone(), ui.style().visuals.text_color()));
+                job.wrap.max_width = ui.available_width() / 2.0 - line_number_width;
+                ui.fonts(|f| f.layout_job(job))
+            };
+            
+            let content_height = galley.size().y;
+            let visible_height = ui.available_height() - 30.0;
+            (content_height, visible_height, line_number_width, char_width)
+        }
 
         fn draw_line_numbers(&self, ui: &mut egui::Ui, galley: &egui::Galley, line_number_width: f32, font_id: egui::FontId) {
             let (rect, _) = ui.allocate_exact_size(
@@ -985,43 +985,16 @@ mod state {
 
                     ui.separator();
 
-                    let search_text = self.palette_search_text.to_lowercase();
-
                     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         for (i, (style_name, is_block)) in self.palette_filtered_styles.iter().enumerate() {
-                        let display_name = if style_name.chars().all(|c| c.is_ascii_digit()) {
-                            format!("样式ID: {} ({})", style_name, if *is_block { "段落" } else { "字符" })
-                        } else {
-                            format!("{} ({})", style_name, if *is_block { "段落" } else { "字符" })
-                        };
-
-                        let mut job = egui::text::LayoutJob::default();
-                        let default_format = egui::TextFormat {
-                            font_id: egui::FontId::default(),
-                            color: ui.style().visuals.text_color(),
-                            ..Default::default()
-                        };
-
-                        if search_text.is_empty() {
-                            job.append(&display_name, 0.0, default_format);
-                        } else {
-                            let highlighter = match regex::Regex::new(&format!("(?i){}", regex::escape(&search_text))) {
-                                Ok(re) => re,
-                                Err(_) => regex::Regex::new(r"^$").unwrap(),
+                            let label = if style_name.chars().all(|c| c.is_ascii_digit()) {
+                                format!("样式ID: {} ({})", style_name, if *is_block { "段落" } else { "字符" })
+                            } else {
+                                format!("{} ({})", style_name, if *is_block { "段落" } else { "字符" })
                             };
-                            let mut last_end = 0;
-                            for mat in highlighter.find_iter(&display_name) {
-                                job.append(&display_name[last_end..mat.start()], 0.0, default_format.clone());
-                                let mut highlighted_format = default_format.clone();
-                                highlighted_format.background = ui.visuals().widgets.hovered.bg_fill;
-                                job.append(mat.as_str(), 0.0, highlighted_format);
-                                last_end = mat.end();
-                            }
-                            job.append(&display_name[last_end..], 0.0, default_format);
-                        }
-
-                        let response = ui.selectable_label(self.palette_selected_index == i, job);
+                            
+                            let response = ui.selectable_label(self.palette_selected_index == i, &label);
                             
                             ui.horizontal(|ui| {
                                 ui.add_sized(
@@ -1278,30 +1251,13 @@ mod state {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let stroke_color = ui.style().visuals.widgets.noninteractive.bg_stroke.color;
                 
-                let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-                let char_width = ui.fonts(|f| f.glyph_width(&font_id, '0'));
-                let line_count = self.markdown_text.lines().count().max(1);
-                let num_digits = line_count.to_string().len();
-                let line_number_width = (num_digits as f32 * char_width) + 15.0;
-
-                let editor_width = (ui.available_width() - ui.style().spacing.item_spacing.x) / 2.0;
-
-                if self.cached_galley.is_none() || self.cached_editor_width != editor_width {
-                    let mut job = egui::text::LayoutJob::default();
-                    job.append(&self.markdown_text, 0.0, egui::TextFormat::simple(font_id.clone(), ui.style().visuals.text_color()));
-                    job.wrap.max_width = editor_width - line_number_width;
-                    self.cached_galley = Some(ui.fonts(|f| f.layout_job(job)));
-                    self.cached_editor_width = editor_width;
-                }
+                let (editor_content_height, editor_visible_height, line_number_width, _char_width) = self.calculate_editor_metrics(ui);
                 
-                let galley = self.cached_galley.as_ref().unwrap().clone();
-                let editor_content_height = galley.size().y;
-
-                let editor_visible_height = ui.available_height() - 30.0;
                 let max_offset_y = (editor_content_height - editor_visible_height).max(0.0);
                 let editor_scrollable = max_offset_y > 0.0;
 
                 ui.columns(2, |columns| {
+
                     egui::Frame::new() 
                         .inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 10 })
                         .stroke(egui::Stroke::new(1.0, stroke_color))
@@ -1315,6 +1271,14 @@ mod state {
                                     .auto_shrink([false; 2])
                                     .show(ui, |ui| {
                                         ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                            let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                                            let galley = {
+                                                let mut job = egui::text::LayoutJob::default();
+                                                job.append(&self.markdown_text, 0.0, egui::TextFormat::simple(font_id.clone(), ui.style().visuals.text_color()));
+                                                job.wrap.max_width = ui.available_width() - line_number_width;
+                                                ui.fonts(|f| f.layout_job(job))
+                                            };
+
                                             ui.horizontal(|ui| {
                                                 self.draw_line_numbers(ui, &galley, line_number_width, font_id.clone());
 
@@ -1332,6 +1296,7 @@ mod state {
                                 if editor_scrollable {
                                     self.scroll_proportion = editor_scroll_response.state.offset.y / max_offset_y;
                                 }
+
                             });
                         });
                     
@@ -1382,34 +1347,61 @@ mod state {
                         let start_byte = self.char_to_byte_index(start_char);
                         let end_byte = self.char_to_byte_index(end_char);
                         let selected_text = &self.markdown_text[start_byte..end_byte];
-
-                        let replacement_text = IMAGE_WIDTH_CONTROL_REGEX.replace_all(selected_text, "![${1}](${2}){width=6in}");
-
-                        if replacement_text.len() != selected_text.len() {
-                            let owned_replacement = replacement_text.into_owned();
-                            self.markdown_text.replace_range(start_byte..end_byte, &owned_replacement);
                             
-                            let new_text_char_len = owned_replacement.chars().count();
-                            let new_cursor_pos_char = start_char + new_text_char_len;
+                            let mut modified_text = selected_text.to_string();
+                            let mut found_images = false;
                             
-                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                                egui::text::CCursor::new(new_cursor_pos_char),
-                            )));
-                            state.store(ctx, editor_id);
-                        } else {
-                            self.open_info_dialog("无图片", "选中的内容中没有找到未设置宽度的标准图片。");
-                        }
-self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                            for cap in IMAGE_WIDTH_CONTROL_REGEX.captures_iter(selected_text).collect::<Vec<_>>().into_iter().rev() {
+                                if let Some(mat) = cap.get(0) {
+                                    let full_match = mat.as_str();
+                                    if !full_match.ends_with("{width=6in}") {
+                                        let replacement = format!("{}{{width=6in}}", full_match);
+                                        modified_text = modified_text.replacen(full_match, &replacement, 1);
+                                        found_images = true;
+                                    }
+                                }
+                            }
+                            
+                            if found_images {
+                                self.markdown_text.replace_range(start_byte..end_byte, &modified_text);
+                                
+                                let new_text_char_len = modified_text.chars().count();
+                                let new_cursor_pos_char = start_char + new_text_char_len;
+                                
+                                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                                    egui::text::CCursor::new(new_cursor_pos_char),
+                                )));
+                                state.store(ctx, editor_id);
+                            } else {
+                                self.show_no_images_alert(ctx);
+                            }
+                    } else {
+                        self.show_no_images_alert(ctx);
                     }
                 } else {
-                    self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                    self.show_no_images_alert(ctx);
                 }
             } else {
-                self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                self.show_no_images_alert(ctx);
             }
         }
         
-
+        fn show_no_images_alert(&mut self, ctx: &egui::Context) {
+            self.show_alert(ctx, "无图片", "选中的内容中没有找到图片。");
+        }
+        
+        fn show_alert(&mut self, ctx: &egui::Context, title: &str, message: &str) {
+            egui::Window::new(title)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(message);
+                    ui.add_space(10.0);
+                    if ui.button("确定").clicked() {
+                    }
+                });
+        }
     }
 }
 
