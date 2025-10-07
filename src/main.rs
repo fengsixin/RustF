@@ -473,24 +473,32 @@ mod state {
                 egui::Sense::hover(),
             );
 
+            let clip_rect = ui.clip_rect();
+
             let mut logical_line = 1;
             for (i, row) in galley.rows.iter().enumerate() {
+                let line_y = rect.min.y + row.pos.y;
+                let row_height = row.row.size.y;
+
+                if line_y > clip_rect.max.y {
+                    break; 
+                }
+
                 if i == 0 || galley.rows.get(i.saturating_sub(1)).is_some_and(|prev_row| prev_row.row.ends_with_newline) {
-                    let line_y = rect.min.y + row.pos.y;
-                    let row_height = row.row.size.y;
-                
-                    let line_rect = egui::Rect::from_min_size(
-                        egui::pos2(rect.left(), line_y),
-                        egui::vec2(rect.width(), row_height),
-                    );
-                
-                    ui.painter().text(
-                        line_rect.right_center(),
-                        egui::Align2::RIGHT_CENTER,
-                        logical_line.to_string(),
-                        font_id.clone(),
-                        egui::Color32::GRAY,
-                    );
+                    if line_y + row_height > clip_rect.min.y {
+                        let line_rect = egui::Rect::from_min_size(
+                            egui::pos2(rect.left(), line_y),
+                            egui::vec2(rect.width(), row_height),
+                        );
+                        
+                        ui.painter().text(
+                            line_rect.right_center(),
+                            egui::Align2::RIGHT_CENTER,
+                            logical_line.to_string(),
+                            font_id.clone(),
+                            egui::Color32::GRAY,
+                        );
+                    }
                     
                     logical_line += 1;
                 }
@@ -542,25 +550,23 @@ mod state {
                                 self.character_styles.sort();
                                 self.reference_doc_path = Some(path);
 
-                                rfd::MessageDialog::new()
-                                    .set_level(rfd::MessageLevel::Info)
-                                    .set_title("模板加载成功")
-                                    .set_description(format!(
+                                self.open_info_dialog(
+                                    "模板加载成功",
+                                    &format!(
                                         "成功加载模板，发现 {} 个段落样式和 {} 个字符样式。",
                                         self.paragraph_styles.len(),
                                         self.character_styles.len()
-                                    ))
-                                    .show();
+                                    )
+                                );
                             }
                             Err(e) => {
                                 self.reference_doc_path = None;
                                 self.paragraph_styles.clear();
                                 self.character_styles.clear();
-                                rfd::MessageDialog::new()
-                                    .set_level(rfd::MessageLevel::Error)
-                                    .set_title("模板加载失败")
-                                    .set_description(format!("无法解析DOCX文件: {:?}", e))
-                                    .show();
+                                self.open_info_dialog(
+                                    "模板加载失败",
+                                    &format!("无法解析DOCX文件: {:?}", e)
+                                );
                             }
                         }
                     }
@@ -568,11 +574,10 @@ mod state {
                         self.reference_doc_path = None;
                         self.paragraph_styles.clear();
                         self.character_styles.clear();
-                        rfd::MessageDialog::new()
-                            .set_level(rfd::MessageLevel::Error)
-                            .set_title("模板加载失败")
-                            .set_description(format!("无法读取文件: {}", e))
-                            .show();
+                        self.open_info_dialog(
+                            "模板加载失败",
+                            &format!("无法读取文件: {}", e)
+                        );
                     }
                 }
             }
@@ -580,11 +585,7 @@ mod state {
 
         pub fn import_from_docx(&mut self) {
             if self.import_receiver.is_some() || self.conversion_receiver.is_some() {
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Warning)
-                    .set_title("请稍候")
-                    .set_description("当前有另一个文件操作任务正在进行中。")
-                    .show();
+                self.open_info_dialog("请稍候", "当前有另一个文件操作任务正在进行中。");
                 return;
             }
 
@@ -634,11 +635,7 @@ mod state {
 
         pub fn export_as_docx(&mut self) {
             if self.conversion_receiver.is_some() {
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Warning)
-                    .set_title("请稍候")
-                    .set_description("上一个转换任务仍在进行中。")
-                    .show();
+                self.open_info_dialog("请稍候", "上一个转换任务仍在进行中。");
                 return;
             }
 
@@ -801,11 +798,11 @@ mod state {
                 let start = mat.start();
                 let end = mat.end();
 
-                let is_preceded = markdown_clone.get(..start)
-                    .and_then(|s| s.chars().last()) == Some('[');
-                
-                let is_followed = markdown_clone.get(end..)
-                    .map_or(false, |s| s.starts_with("]{.underline}"));
+        let is_preceded = markdown_clone.get(..start)
+            .map_or(false, |s| s.trim_end().ends_with('['));
+        
+        let is_followed = markdown_clone.get(end..)
+            .map_or(false, |s| s.trim_start().starts_with("]{.underline}"));
 
                 if !is_preceded || !is_followed {
                     replacements.push((mat.range(), format!("[{}]{{.underline}}", mat.as_str())));
@@ -1372,40 +1369,44 @@ mod state {
         pub fn apply_image_width_control(&mut self, ctx: &egui::Context) {
             let editor_id = egui::Id::new("main_editor_id");
             
-            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-                if let Some(char_range) = state.cursor.char_range() {
-                    let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
-
-                    if primary_idx != secondary_idx {
-                        let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
-
-                        let start_byte = self.char_to_byte_index(start_char);
-                        let end_byte = self.char_to_byte_index(end_char);
-                        let selected_text = &self.markdown_text[start_byte..end_byte];
-
-                        let replacement_text = IMAGE_WIDTH_CONTROL_REGEX.replace_all(selected_text, "![${1}](${2}){width=6in}");
-
-                        if replacement_text.len() != selected_text.len() {
-                            let owned_replacement = replacement_text.into_owned();
-                            self.markdown_text.replace_range(start_byte..end_byte, &owned_replacement);
-                            
-                            let new_text_char_len = owned_replacement.chars().count();
-                            let new_cursor_pos_char = start_char + new_text_char_len;
-                            
-                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                                egui::text::CCursor::new(new_cursor_pos_char),
-                            )));
-                            state.store(ctx, editor_id);
-                        } else {
-                            self.open_info_dialog("无图片", "选中的内容中没有找到未设置宽度的标准图片。");
-                        }
-self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
-                    }
-                } else {
-                    self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
-                }
-            } else {
+            let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) else {
                 self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                return;
+            };
+        
+            let Some(char_range) = state.cursor.char_range() else {
+                self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                return;
+            };
+        
+            let (primary_idx, secondary_idx) = (char_range.primary.index, char_range.secondary.index);
+        
+            if primary_idx == secondary_idx {
+                self.open_info_dialog("无图片", "请选择要添加宽度属性的图片文本。");
+                return;
+            }
+
+            let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
+
+            let start_byte = self.char_to_byte_index(start_char);
+            let end_byte = self.char_to_byte_index(end_char);
+            let selected_text = &self.markdown_text[start_byte..end_byte];
+
+            let replacement_text = IMAGE_WIDTH_CONTROL_REGEX.replace_all(selected_text, "![${1}](${2}){width=6in}");
+
+            if replacement_text.len() != selected_text.len() {
+                let owned_replacement = replacement_text.into_owned();
+                self.markdown_text.replace_range(start_byte..end_byte, &owned_replacement);
+                
+                let new_text_char_len = owned_replacement.chars().count();
+                let new_cursor_pos_char = start_char + new_text_char_len;
+                
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(new_cursor_pos_char),
+                )));
+                state.store(ctx, editor_id);
+            } else {
+                self.open_info_dialog("无图片", "选中的内容中没有找到未设置宽度的标准图片。");
             }
         }
         
