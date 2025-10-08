@@ -92,7 +92,7 @@ mod state {
     static UNDERLINE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{.*?\}\}").expect("Invalid regex for underline"));
     static TEMPLATE_VAR_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([^}]+?)\}\}").expect("Invalid regex for template variables"));
     static IMAGE_WIDTH_CONTROL_REGEX: Lazy<Regex> = Lazy::new(|| 
-        Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)(?!\{)").expect("Invalid regex for image width control")
+        Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").expect("Invalid regex for image width control")
     );
 
     pub struct MyApp {
@@ -1241,10 +1241,25 @@ mod state {
                     if primary_idx != secondary_idx {
                         let (start_char, end_char) = (primary_idx.min(secondary_idx), primary_idx.max(secondary_idx));
 
-                        let start_byte = self.char_to_byte_index(start_char);
-                        let end_byte = self.char_to_byte_index(end_char);
+                        // --- BUG FIX: 边界健壮性检查 ---
+                        // 确保 end_char 不超过当前文本的实际字符长度
+                        let text_char_len = self.markdown_text.chars().count();
+                        let safe_end_char = end_char.min(text_char_len);
 
-                        let new_text = format!("{prefix}{}{suffix}", &self.markdown_text[start_byte..end_byte]);
+                        let start_byte = self.char_to_byte_index(start_char);
+                        let end_byte = self.char_to_byte_index(safe_end_char);
+                        
+                        // 确保切片的结束字节不大于字符串总长度
+                        let end_byte = end_byte.min(self.markdown_text.len());
+                        
+                        // 如果切片范围不合法，则不进行操作
+                        if start_byte > end_byte {
+                            self.open_info_dialog("操作失败", "无法应用格式：无效的文本区域。");
+                            return;
+                        }
+
+                        let selected_text = &self.markdown_text[start_byte..end_byte];
+                        let new_text = format!("{prefix}{}{suffix}", selected_text);
                         self.markdown_text.replace_range(start_byte..end_byte, &new_text);
 
                         let new_text_char_len = new_text.chars().count();
@@ -1392,13 +1407,48 @@ mod state {
             let end_byte = self.char_to_byte_index(end_char);
             let selected_text = &self.markdown_text[start_byte..end_byte];
 
-            let replacement_text = IMAGE_WIDTH_CONTROL_REGEX.replace_all(selected_text, "![${1}](${2}){width=6in}");
-
-            if replacement_text.len() != selected_text.len() {
-                let owned_replacement = replacement_text.into_owned();
-                self.markdown_text.replace_range(start_byte..end_byte, &owned_replacement);
+            // Check if the selected text contains an image without width attributes
+            // First, find all image matches in the selected text
+            let mut modified_text = selected_text.to_string();
+            let mut has_image_without_width = false;
+            
+            // For each image match in the selected text, check if it's not followed by width attributes
+            for mat in IMAGE_WIDTH_CONTROL_REGEX.captures_iter(selected_text) {
+                let full_match = &mat[0];
                 
-                let new_text_char_len = owned_replacement.chars().count();
+                // Find the position of this match in the selected text
+                if let Some(pos) = selected_text.find(full_match) {
+                    // Check if the text immediately after this image doesn't have width attributes
+                    let after_pos = pos + full_match.len();
+                    let remaining_text = &selected_text[after_pos..];
+                    
+                    // Check if curly braces follow immediately and contain width/height
+                    if remaining_text.starts_with('{') {
+                        if !remaining_text.contains("width=") && !remaining_text.contains("height=") {
+                            // Replace the image with one that has width attribute
+                            let alt_text = &mat[1];  // First capture group (alt text)
+                            let url = &mat[2];       // Second capture group (URL)
+                            let img_with_width = format!("![{}]({}){{width=6in}}", alt_text, url);
+                            modified_text = modified_text.replacen(full_match, &img_with_width, 1);
+                            has_image_without_width = true;
+                            break; // Just modify the first one found
+                        }
+                    } else {
+                        // No curly braces after the image, so it doesn't have width attributes
+                        let alt_text = &mat[1];  // First capture group (alt text)
+                        let url = &mat[2];       // Second capture group (URL)
+                        let img_with_width = format!("![{}]({}){{width=6in}}", alt_text, url);
+                        modified_text = modified_text.replacen(full_match, &img_with_width, 1);
+                        has_image_without_width = true;
+                        break; // Just modify the first one found
+                    }
+                }
+            }
+
+            if has_image_without_width {
+                self.markdown_text.replace_range(start_byte..end_byte, &modified_text);
+                
+                let new_text_char_len = modified_text.chars().count();
                 let new_cursor_pos_char = start_char + new_text_char_len;
                 
                 state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
