@@ -1477,3 +1477,433 @@ fn main() {
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)) as Box<dyn App>)),
     ).unwrap();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // 辅助函数：创建一个用于测试的 App 实例
+    fn setup_test_app(markdown: &str) -> state::MyApp {
+        state::MyApp {
+            markdown_text: markdown.to_string(),
+            cache: egui_commonmark::CommonMarkCache::default(),
+            scroll_linked: true,
+            scroll_proportion: 0.0,
+            preview_max_scroll: 0.0,
+            
+            assignment_window_open: false,
+            template_markers: Vec::new(),
+            marker_values: HashMap::new(),
+            conversion_receiver: None,
+            import_receiver: None,
+            reference_doc_path: None,
+            about_window_open: false,
+            paragraph_styles: Vec::new(),
+            character_styles: Vec::new(),
+            style_palette_open: false,
+            palette_search_text: String::new(),
+            palette_selected_index: 0,
+            palette_filtered_styles: Vec::new(),
+            palette_should_scroll_to_selected: false,
+            info_dialog_open: false,
+            info_dialog_title: String::new(),
+            info_dialog_message: String::new(),
+            import_dialog_open: false,
+            import_text_area: String::new(),
+            processing_task: false,
+            markdown_text_hash: fxhash::hash64(markdown.as_bytes()),
+            
+            cached_galley: None,
+            cached_editor_width: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_setup_test_app() {
+        let app = setup_test_app("Test content");
+        assert_eq!(app.markdown_text, "Test content");
+    }
+
+    // 测试模板变量扫描功能
+    #[test]
+    fn test_scan_no_markers() {
+        let mut app = setup_test_app("This is plain text without markers.");
+        app.scan_and_update_markers();
+        assert!(app.template_markers.is_empty());
+        assert!(app.marker_values.is_empty());
+    }
+
+    #[test]
+    fn test_scan_simple_markers() {
+        let mut app = setup_test_app("This has {{var1}} and {{var2}} markers.");
+        app.scan_and_update_markers();
+        assert_eq!(app.template_markers.len(), 2);
+        assert!(app.template_markers.contains(&"{{var1}}".to_string()));
+        assert!(app.template_markers.contains(&"{{var2}}".to_string()));
+        assert_eq!(app.marker_values.len(), 2);
+        assert!(app.marker_values.contains_key("{{var1}}"));
+        assert!(app.marker_values.contains_key("{{var2}}"));
+        assert_eq!(app.marker_values.get("{{var1}}").unwrap(), "");
+        assert_eq!(app.marker_values.get("{{var2}}").unwrap(), "");
+    }
+
+    #[test]
+    fn test_scan_duplicate_markers() {
+        let mut app = setup_test_app("This has {{var1}} and {{var1}} duplicate markers.");
+        app.scan_and_update_markers();
+        assert_eq!(app.template_markers.len(), 1);
+        assert!(app.template_markers.contains(&"{{var1}}".to_string()));
+        assert_eq!(app.marker_values.len(), 1);
+        assert!(app.marker_values.contains_key("{{var1}}"));
+    }
+
+    #[test]
+    fn test_scan_update_markers() {
+        let mut app = setup_test_app("Original: {{var1}}");
+        app.scan_and_update_markers();
+        assert_eq!(app.template_markers.len(), 1);
+        assert!(app.marker_values.contains_key("{{var1}}"));
+
+        // 修改文本，增加和删除标记
+        app.markdown_text = "Modified: {{var2}} and {{var3}}".to_string();
+        app.scan_and_update_markers();
+        
+        assert_eq!(app.template_markers.len(), 2);
+        assert!(app.template_markers.contains(&"{{var2}}".to_string()));
+        assert!(app.template_markers.contains(&"{{var3}}".to_string()));
+        
+        // 确保旧的标记已移除
+        assert!(!app.marker_values.contains_key("{{var1}}"));
+        // 新的标记已添加
+        assert!(app.marker_values.contains_key("{{var2}}"));
+        assert!(app.marker_values.contains_key("{{var3}}"));
+    }
+
+    // 测试模板变量应用功能
+    #[test]
+    fn test_apply_all_markers() {
+        let mut app = setup_test_app("Hello {{name}}, welcome to {{place}}!");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 设置变量值
+        app.marker_values.insert("{{name}}".to_string(), "Alice".to_string());
+        app.marker_values.insert("{{place}}".to_string(), "Wonderland".to_string());
+        
+        app.apply_template_variables_to_markdown();
+        
+        assert_eq!(app.markdown_text, "Hello Alice, welcome to Wonderland!");
+    }
+
+    #[test]
+    fn test_apply_partial_markers() {
+        let mut app = setup_test_app("Hello {{name}}, welcome to {{place}}!");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 只设置部分变量值
+        app.marker_values.insert("{{name}}".to_string(), "Alice".to_string());
+        // {{place}} 没有设置值
+        
+        app.apply_template_variables_to_markdown();
+        
+        assert_eq!(app.markdown_text, "Hello Alice, welcome to {{place}}!");
+    }
+
+    #[test]
+    fn test_apply_empty_value_marker() {
+        let mut app = setup_test_app("Hello {{name}}!");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 设置变量值为空字符串 - 实际实现中，空值不会被替换
+        app.marker_values.insert("{{name}}".to_string(), "".to_string());
+        
+        app.apply_template_variables_to_markdown();
+        
+        // 空值不会被替换，标记保持原样
+        assert_eq!(app.markdown_text, "Hello {{name}}!");
+    }
+
+    // 测试导入和应用变量功能
+    #[test]
+    fn test_import_valid_format() {
+        let mut app = setup_test_app("{{name}} is {{age}} years old.");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 导入格式为 "key=value" 的文本
+        let import_text = "name=Alice\nage=30";
+        app.import_and_apply_variables(import_text);
+        
+        assert_eq!(app.markdown_text, "Alice is 30 years old.");
+    }
+
+    #[test]
+    fn test_import_with_braces() {
+        let mut app = setup_test_app("{{name}} is {{age}} years old.");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 导入的键名包含花括号
+        let import_text = "{{name}}=Bob\n{{age}}=25";
+        app.import_and_apply_variables(import_text);
+        
+        assert_eq!(app.markdown_text, "Bob is 25 years old.");
+    }
+
+    #[test]
+    fn test_import_mismatched_markers() {
+        let mut app = setup_test_app("This text has {{existing}} marker.");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 导入的变量在当前文本中不存在
+        let import_text = "nonexistent=value\nother=test";
+        app.import_and_apply_variables(import_text);
+        
+        // 文本不应改变，因为导入的变量不存在于文本中
+        assert_eq!(app.markdown_text, "This text has {{existing}} marker.");
+        // 导入的值不应该被保存，因为它们在文本中不存在
+        assert!(!app.marker_values.contains_key("{{nonexistent}}"));
+        assert!(!app.marker_values.contains_key("{{other}}"));
+        // 但 {{existing}} 应该仍然存在
+        assert!(app.marker_values.contains_key("{{existing}}"));
+    }
+
+    #[test]
+    fn test_import_malformed_lines() {
+        let mut app = setup_test_app("{{name}} is {{age}}.");
+        app.scan_and_update_markers(); // 扫描标记
+        
+        // 导入包含空行或没有 "=" 的行
+        let import_text = "name=Charlie\n\ninvalid_line\nage=35";
+        app.import_and_apply_variables(import_text);
+        
+        assert_eq!(app.markdown_text, "Charlie is 35.");
+    }
+
+    // 辅助函数：测试格式化逻辑（独立于UI状态）
+    fn format_text_logic(text: &str, selection_start_char: usize, selection_end_char: usize, prefix: &str, suffix: &str) -> String {
+        if selection_start_char == selection_end_char {
+            // No selection - insert prefix and suffix at the cursor position
+            let byte_pos = text.char_indices().nth(selection_start_char).map(|(i, _)| i).unwrap_or(text.len());
+            format!("{}{}{}{}", &text[..byte_pos], prefix, suffix, &text[byte_pos..])
+        } else {
+            // Text is selected - wrap the selected text with prefix and suffix
+            let start_byte = text.char_indices().nth(selection_start_char).map(|(i, _)| i).unwrap_or(0);
+            let end_byte = text.char_indices().nth(selection_end_char).map(|(i, _)| i).unwrap_or(text.len());
+            
+            let selected_text = &text[start_byte..end_byte];
+            let new_text = format!("{}{}{}", prefix, selected_text, suffix);
+            
+            format!("{}{}{}", &text[..start_byte], &new_text, &text[end_byte..])
+        }
+    }
+
+    // 测试文本格式化功能
+    #[test]
+    fn test_format_no_selection() {
+        // 测试没有选择文本时，插入格式符号
+        let result = format_text_logic("Hello world", 5, 5, "**", "**");
+        assert_eq!(result, "Hello**** world"); // 光标在 'o' 和 ' ' 之间
+    }
+
+    #[test]
+    fn test_format_with_selection() {
+        // 测试选中文本时，用格式符号包裹
+        let result = format_text_logic("Hello world", 0, 5, "**", "**"); // 选择 "Hello"
+        assert_eq!(result, "**Hello** world");
+    }
+
+    #[test]
+    fn test_format_selection_at_edges() {
+        // 测试在字符串开头的选择
+        let result = format_text_logic("Hello world", 0, 5, "*", "*"); // 选择 "Hello"
+        assert_eq!(result, "*Hello* world");
+        
+        // 测试在字符串结尾的选择
+        let result = format_text_logic("Hello world", 6, 11, "*", "*"); // 选择 "world" 
+        assert_eq!(result, "Hello *world*");
+    }
+
+    #[test]
+    fn test_format_multibyte_chars() {
+        // 测试包含中文字符的情况
+        let result = format_text_logic("你好世界", 1, 2, "**", "**"); // 选择 "好"
+        assert_eq!(result, "你**好**世界");
+    }
+
+    // 辅助函数：测试下划线逻辑
+    fn apply_underline_logic(text: &str) -> String {
+        // 使用和 apply_underline_to_variables 相同的正则表达式逻辑
+        let regex = regex::Regex::new(r"\{\{[^{}]+\}\}").unwrap();
+        let mut result = text.to_string();
+        
+        // Find all matches in reverse order to avoid index shifting issues
+        let matches: Vec<_> = regex.find_iter(text).collect();
+        for mat in matches.into_iter().rev() {
+            let start = mat.start();
+            let end = mat.end();
+            
+            // Check if this match is already preceded by [ and followed by ]{.underline}
+            let is_preceded = text.get(..start)
+                .map_or(false, |s| s.trim_end().ends_with('['));
+            let is_followed = text.get(end..)
+                .map_or(false, |s| s.trim_start().starts_with("]{.underline}"));
+            
+            if !is_preceded || !is_followed {
+                // Not already underlined, so add underline formatting
+                let replacement = format!("[{}]{{.underline}}", mat.as_str());
+                result.replace_range(start..end, &replacement);
+            }
+        }
+        
+        result
+    }
+
+    // 测试下划线功能
+    #[test]
+    fn test_underline_needed() {
+        let result = apply_underline_logic("Hello {{name}} world");
+        assert_eq!(result, "Hello [{{name}}]{.underline} world");
+    }
+
+    #[test]
+    fn test_underline_already_exists() {
+        let result = apply_underline_logic("Hello [{{name}}]{.underline} world");
+        // Already underlined, so it should remain unchanged
+        assert_eq!(result, "Hello [{{name}}]{.underline} world");
+    }
+
+    #[test]
+    fn test_underline_mixed_content() {
+        let result = apply_underline_logic("{{first}} and [{{second}}]{.underline} and {{third}}");
+        assert_eq!(result, "[{{first}}]{.underline} and [{{second}}]{.underline} and [{{third}}]{.underline}");
+    }
+
+    // 辅助函数：测试图片宽度控制逻辑
+    fn apply_image_width_logic(selected_text: &str) -> String {
+        // 使用基本的正则来匹配图片语法
+        let regex = regex::Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+        
+        // We'll process the text and add width only to images that don't already have parameters
+        let mut result = selected_text.to_string();
+        
+        // Find all image matches
+        let matches: Vec<_> = regex.captures_iter(selected_text).collect();
+        
+        for mat in matches.iter().rev() { // Process in reverse to maintain string indices
+            let full_match = &mat[0];  // Full match: ![alt](url)
+            let alt_text = &mat[1];    // First capture group: alt text
+            let url = &mat[2];         // Second capture group: URL
+            
+            // Find the position of this match in the text
+            if let Some(pos) = result.rfind(full_match) {
+                // Check if the text immediately after this image doesn't have curly braces with width/height
+                let after_pos = pos + full_match.len();
+                let remaining_text = &result[after_pos..];
+                
+                // If it doesn't start with curly braces or has curly braces without width/height
+                if !remaining_text.starts_with('{') || 
+                   (!remaining_text.contains("width=") && !remaining_text.contains("height=")) {
+                    // Replace the image with one that has width attribute
+                    let img_with_width = format!("![{}]({}){{width=6in}}", alt_text, url);
+                    result = result.replacen(full_match, &img_with_width, 1);
+                }
+            }
+        }
+        
+        result
+    }
+
+    // 测试图片宽度控制功能
+    #[test]
+    fn test_add_width_to_standard_image() {
+        let result = apply_image_width_logic("![alt text](path/to/image.png)");
+        assert_eq!(result, "![alt text](path/to/image.png){width=6in}");
+    }
+
+    #[test]
+    fn test_ignore_image_with_width() {
+        let result = apply_image_width_logic("![alt text](path/to/image.png){width=10cm}");
+        // Image already has width, so it should remain unchanged
+        assert_eq!(result, "![alt text](path/to/image.png){width=10cm}");
+    }
+
+    #[test]
+    fn test_ignore_image_with_other_attributes() {
+        let result = apply_image_width_logic("![alt text](path/to/image.png){height=5cm}");
+        // Image already has attributes, so it should remain unchanged
+        assert_eq!(result, "![alt text](path/to/image.png){height=5cm}");
+    }
+
+    #[test]
+    fn test_no_image_in_selection() {
+        let result = apply_image_width_logic("This is just plain text");
+        // No images in text, so it should remain unchanged
+        assert_eq!(result, "This is just plain text");
+    }
+
+    #[test]
+    fn test_multiple_images() {
+        let result = apply_image_width_logic("![image1](img1.png) and ![image2](img2.png)");
+        assert_eq!(result, "![image1](img1.png){width=6in} and ![image2](img2.png){width=6in}");
+    }
+
+    // 测试样式过滤功能
+    #[test]
+    fn test_style_filter_empty_query() {
+        let mut app = setup_test_app("");
+        app.paragraph_styles = vec!["Heading 1".to_string(), "MyStyle".to_string()];
+        app.character_styles = vec!["Emphasis".to_string(), "CustomHighlight".to_string()];
+        
+        // 空搜索词，应返回所有样式
+        app.palette_search_text = "".to_string();
+        app.update_filtered_styles();
+        
+        assert_eq!(app.palette_filtered_styles.len(), 4);
+        assert!(app.palette_filtered_styles.iter().any(|(style, is_paragraph)| style == "Heading 1" && *is_paragraph));
+        assert!(app.palette_filtered_styles.iter().any(|(style, is_paragraph)| style == "MyStyle" && *is_paragraph));
+        assert!(app.palette_filtered_styles.iter().any(|(style, is_paragraph)| style == "Emphasis" && !is_paragraph));
+        assert!(app.palette_filtered_styles.iter().any(|(style, is_paragraph)| style == "CustomHighlight" && !is_paragraph));
+    }
+
+    #[test]
+    fn test_style_filter_case_insensitive() {
+        let mut app = setup_test_app("");
+        app.paragraph_styles = vec!["Heading 1".to_string(), "MyStyle".to_string()];
+        app.character_styles = vec!["Emphasis".to_string(), "CustomHighlight".to_string()];
+        
+        // 使用大小写混合的搜索词
+        app.palette_search_text = "HEADING".to_string();
+        app.update_filtered_styles();
+        
+        assert_eq!(app.palette_filtered_styles.len(), 1);
+        assert_eq!(app.palette_filtered_styles[0].0, "Heading 1");
+        assert!(app.palette_filtered_styles[0].1); // is_paragraph should be true
+    }
+
+    #[test]
+    fn test_style_filter_no_results() {
+        let mut app = setup_test_app("");
+        app.paragraph_styles = vec!["Heading 1".to_string(), "MyStyle".to_string()];
+        app.character_styles = vec!["Emphasis".to_string(), "CustomHighlight".to_string()];
+        
+        // 使用无法匹配任何样式的搜索词
+        app.palette_search_text = "NonExistentStyle".to_string();
+        app.update_filtered_styles();
+        
+        assert_eq!(app.palette_filtered_styles.len(), 0);
+    }
+
+    #[test]
+    fn test_style_filter_partial_match() {
+        let mut app = setup_test_app("");
+        app.paragraph_styles = vec!["Heading 1".to_string(), "MyStyle".to_string()];
+        app.character_styles = vec!["Emphasis".to_string(), "CustomHighlight".to_string()];
+        
+        // 使用能部分匹配的搜索词
+        app.palette_search_text = "Custom".to_string();
+        app.update_filtered_styles();
+        
+        assert_eq!(app.palette_filtered_styles.len(), 1);
+        assert_eq!(app.palette_filtered_styles[0].0, "CustomHighlight");
+        assert!(!app.palette_filtered_styles[0].1); // is_paragraph should be false (character style)
+    }
+}
