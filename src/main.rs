@@ -49,20 +49,114 @@ mod font_utils {
 
         #[cfg(target_os = "linux")]
         {
+            // 首先尝试使用 fontconfig 检测系统字体
+            if let Ok(font_path) = find_chinese_font_with_fontconfig() {
+                if let Ok(font_data) = std::fs::read(&font_path) {
+                    return Some(egui::FontData::from_owned(font_data));
+                }
+            }
+            
+            // 如果 fontconfig 失败，尝试硬编码的常见中文字体路径
             let font_paths = [
+                // Noto 字体家族 (Google) - 最常见
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
                 "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
                 "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/wenquan-micro-hei/wqy-microhei.ttc",
-                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                
+                // 文泉驿字体
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-microhei-bold.ttc",
+                "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+                "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei-bold.ttc",
+                
+                // 思源字体
+                "/usr/share/fonts/opentype/noto/SansCJK.ttc",
+                "/usr/share/fonts/truetype/noto-fonts-cjk/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/NotoColorEmojiCJK/NotoSansCJK.ttc",
+                
+                // 传统中文字体
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // 虽然不是中文专有，但支持中文字符
                 "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+                "/usr/share/fonts/truetype/ttf-dejavu/DroidSansFallbackFull.ttf",
+                
+                // Ubuntu/Debian 系统字体
+                "/usr/share/fonts/truetype/fonts-noto-cjk/NotoSansCJK-Regular.ttc",
+                
+                // Arch Linux 系统字体
+                "/usr/share/fonts/noto/NotoSansCJK.ttc",
+                "/usr/share/fonts/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/TTF/NotoSansCJK.ttc",
+                
+                // Fedora 系统字体
+                "/usr/share/fonts/google-noto-cjk/NotoSansCJK.ttc",
             ];
             for font_path in &font_paths {
-                if let Ok(font_data) = std::fs::read(font_path) {
-                    return Some(egui::FontData::from_owned(font_data));
+                if std::path::Path::new(font_path).exists() {
+                    if let Ok(font_data) = std::fs::read(font_path) {
+                        return Some(egui::FontData::from_owned(font_data));
+                    }
                 }
             }
         }
 
+        // 如果所有系统字体加载都失败，尝试使用嵌入的字体
+        load_embedded_font()
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn find_chinese_font_with_fontconfig() -> Result<String, Box<dyn std::error::Error>> {
+        use std::process::Command;
+        
+        // 尝试使用 fc-match 命令查找中文字体
+        let output = Command::new("fc-match")
+            .arg("-f")
+            .arg("%{file}")
+            .arg(":lang=zh")
+            .output()?;
+        
+        if !output.status.success() {
+            return Err("fc-match failed".into());
+        }
+        
+        let font_path = String::from_utf8(output.stdout)?
+            .trim()
+            .to_string();
+        
+        if font_path.is_empty() {
+            return Err("No Chinese font found".into());
+        }
+        
+        Ok(font_path)
+    }
+    
+    // 嵌入字体作为后备选项
+    fn load_embedded_font() -> Option<egui::FontData> {
+        // 首先检查是否已定义了嵌入的字体数据
+        // 如果没有，我们提供一个通用的后备字体检测函数
+        #[cfg(target_os = "linux")]
+        {
+            // 尝试查找最通用的字体
+            let fallback_fonts = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/droid/DroidSans.ttf",
+            ];
+            
+            for font_path in &fallback_fonts {
+                if std::path::Path::new(font_path).exists() {
+                    if let Ok(font_data) = std::fs::read(font_path) {
+                        return Some(egui::FontData::from_owned(font_data));
+                    }
+                }
+            }
+        }
+        
+        // 如果所有后备路径也失败，返回 None
         None
     }
 }
